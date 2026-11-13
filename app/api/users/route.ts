@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { errorMessage, jsonError } from "@/lib/http";
 import { hashPassword, validatePassword } from "@/lib/auth/password";
-import { PUBLIC_USER_COLUMNS, getRequestUser, isValidEmail, normalizeEmail } from "@/lib/auth/users";
+import { PUBLIC_USER_COLUMNS, cleanRegions, getRequestUser, isValidEmail, normalizeEmail } from "@/lib/auth/users";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,11 +29,11 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** POST /api/users - { full_name, email, role, password } (admin). */
+/** POST /api/users - { full_name, email, role, password, regions? } (admin). */
 export async function POST(req: NextRequest) {
   if (!requireAdmin(req)) return jsonError("Akses ditolak: fitur ini hanya untuk Admin.", 403);
 
-  let body: { full_name?: string; email?: string; role?: string; password?: string };
+  let body: { full_name?: string; email?: string; role?: string; password?: string; regions?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -48,11 +48,13 @@ export async function POST(req: NextRequest) {
   if (!role) return jsonError("Role harus 'admin' atau 'agent'.");
   const passwordError = validatePassword(body.password);
   if (passwordError) return jsonError(passwordError);
+  const regions = body.regions === undefined ? [] : cleanRegions(body.regions);
+  if (!Array.isArray(regions)) return jsonError(regions.error);
 
   try {
     const { data, error } = await getSupabaseAdmin()
       .from("app_users")
-      .insert({ full_name: fullName, email, role, password_hash: await hashPassword(body.password as string) })
+      .insert({ full_name: fullName, email, role, regions, password_hash: await hashPassword(body.password as string) })
       .select(PUBLIC_USER_COLUMNS)
       .single();
     if (error) {

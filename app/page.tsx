@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Car, FlaskConical, Loader2, LogOut, MessagesSquare, Send, Users } from "lucide-react";
+import { BookOpen, Bot, Car, FlaskConical, Loader2, LogOut, MessagesSquare, Send, Users } from "lucide-react";
 import InboxTab from "@/components/InboxTab";
 import CapiSyncTab from "@/components/CapiSyncTab";
+import KnowledgeTab from "@/components/KnowledgeTab";
 import UsersTab, { RoleBadge } from "@/components/UsersTab";
 import { api } from "@/components/ui";
 import type { AppConfig, AppUser } from "@/lib/types";
 
-type Tab = "inbox" | "capi" | "users";
+type Tab = "inbox" | "capi" | "knowledge" | "users";
 type Me = Pick<AppUser, "id" | "email" | "full_name" | "role">;
 
 export default function HubPage() {
@@ -96,13 +97,25 @@ export default function HubPage() {
 
           <nav className="-mb-px flex basis-full gap-1 overflow-x-auto md:basis-0 md:grow" aria-label="Navigasi utama">
             <button type="button" onClick={() => setTab("inbox")} className={tabClass("inbox")}>
-              <MessagesSquare className="h-4 w-4" /> Inbox & Chatbot
+              <MessagesSquare className="h-4 w-4" />
+              <span>
+                Inbox<span className="hidden xl:inline"> &amp; Chatbot</span>
+              </span>
             </button>
             {isAdmin && (
               <>
                 <button type="button" onClick={() => setTab("capi")} className={tabClass("capi")}>
-                  <Send className="h-4 w-4" /> Meta CAPI Sync
-                  <span className="hidden 2xl:inline"> (CTWA Warm {config?.capi_window_days ?? 7} Hari)</span>
+                  <Send className="h-4 w-4" />
+                  <span>
+                    <span className="hidden xl:inline">Meta </span>CAPI Sync
+                    <span className="hidden 2xl:inline"> (CTWA Warm {config?.capi_window_days ?? 7} Hari)</span>
+                  </span>
+                </button>
+                <button type="button" onClick={() => setTab("knowledge")} className={tabClass("knowledge")}>
+                  <BookOpen className="h-4 w-4" />
+                  <span>
+                    Knowledge<span className="hidden xl:inline"> Base</span>
+                  </span>
                 </button>
                 <button type="button" onClick={() => setTab("users")} className={tabClass("users")}>
                   <Users className="h-4 w-4" /> Pengguna
@@ -134,6 +147,9 @@ export default function HubPage() {
                   setTab("inbox");
                 }}
               />
+            </div>
+            <div className={tab === "knowledge" ? "h-full" : "hidden"}>
+              <KnowledgeTab active={tab === "knowledge"} />
             </div>
             <div className={tab === "users" ? "h-full" : "hidden"}>
               <UsersTab active={tab === "users"} currentUserId={me.id} />

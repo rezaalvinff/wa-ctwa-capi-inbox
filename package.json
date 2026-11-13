@@ -10,10 +10,13 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.72.0",
+    "mammoth": "^1.13.0",
     "next": "15.5.29",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "unpdf": "^1.9.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
