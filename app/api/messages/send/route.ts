@@ -4,6 +4,8 @@ import { errorMessage, jsonError } from "@/lib/http";
 import { isMockMode } from "@/lib/config";
 import { sendWhatsAppText } from "@/lib/whatsapp";
 import { getRequestUser } from "@/lib/auth/users";
+import { canAccessLead } from "@/lib/auth/access";
+import { CHAT_CLOSE_HOURS, isChatClosed } from "@/lib/leads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,11 +37,18 @@ export async function POST(req: NextRequest) {
 
     const { data: lead, error: leadError } = await supabase
       .from("leads")
-      .select("id, phone_number, is_simulated")
+      .select("id, phone_number, is_simulated, assigned_agent_id, last_activity_at, last_customer_message_at, created_at")
       .eq("id", leadId)
       .maybeSingle();
     if (leadError) throw leadError;
     if (!lead) return jsonError("Lead tidak ditemukan.", 404);
+    if (!canAccessLead(agent, lead)) return jsonError("Lead ini tidak dioper ke Anda.", 403);
+    if (isChatClosed(lead)) {
+      return jsonError(
+        `Chat sudah ditutup otomatis karena tidak ada aktivitas ${CHAT_CLOSE_HOURS} jam. Room akan terbuka lagi bila pelanggan mengirim pesan baru.`,
+        409,
+      );
+    }
 
     // Lead simulasi tidak pernah dikirim ke WhatsApp (nomor acak bisa milik orang lain).
     const mock = isMockMode() || Boolean(lead.is_simulated);

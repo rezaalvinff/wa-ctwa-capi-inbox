@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { errorMessage, jsonError } from "@/lib/http";
 import { hashPassword, validatePassword } from "@/lib/auth/password";
 import { SESSION_COOKIE, getAuthSecret, sessionCookieOptions, signSession } from "@/lib/auth/session";
-import { PUBLIC_USER_COLUMNS, getRequestUser } from "@/lib/auth/users";
+import { PUBLIC_USER_COLUMNS, cleanRegions, getRequestUser } from "@/lib/auth/users";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,11 +13,12 @@ interface PatchBody {
   role?: string;
   is_active?: boolean;
   password?: string;
+  regions?: unknown;
 }
 
 /**
  * PATCH /api/users/:id (admin)
- * Ubah nama, role, status aktif, atau reset password.
+ * Ubah nama, role, wilayah (agent), status aktif, atau reset password.
  * Perubahan role/status/password menaikkan session_version -> sesi lama user tsb otomatis logout.
  */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -66,6 +67,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         patch.is_active = body.is_active;
         revokeSessions = true;
       }
+    }
+    if (body.regions !== undefined) {
+      const regions = cleanRegions(body.regions);
+      if (!Array.isArray(regions)) return jsonError(regions.error);
+      patch.regions = regions;
     }
     if (body.password !== undefined) {
       const passwordError = validatePassword(body.password);

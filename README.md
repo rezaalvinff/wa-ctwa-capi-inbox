@@ -30,17 +30,22 @@ app/
     cron/capi-sync/route.ts         # GET dipanggil Vercel Cron (proteksi CRON_SECRET)
     config/route.ts                 # GET flag non-rahasia untuk UI (mock mode, engine AI)
     auth/login|logout|me            # Login (scrypt + cookie sesi), logout, user aktif
-    users/route.ts, users/[id]      # Kelola user (Admin): list, tambah, ubah role/status, reset password
+    users/route.ts, users/[id]      # Kelola user (Admin): list, tambah, wilayah, ubah role/status, reset password
+    knowledge/, knowledge/upload, knowledge/[id]  # Knowledge base (Admin): list, tambah manual, upload file, edit, hapus
 components/
   InboxTab.tsx                      # Tab 1: daftar prospek, roomchat, panel kualifikasi
   CapiSyncTab.tsx                   # Tab 2: statistik, tombol auto-send, tabel monitoring
-  UsersTab.tsx                      # Tab Pengguna (Admin)
+  UsersTab.tsx                      # Tab Pengguna (Admin) + wilayah agent
+  KnowledgeTab.tsx                  # Tab Knowledge Base (Admin): upload/tulis/edit materi
   ui.tsx                            # Badge, tag WARM/COLD, copy button, formatter
 lib/
   chatbot.ts                        # Gemini structured output + fallback rule-based + simulator
   bot-engine.ts                     # Orkestrasi bot: ekstraksi -> update lead -> handoff -> kirim WA
   capi.ts                           # Filter eligible + kirim CAPI per lead + logging
-  leads.ts                          # computeStatus (cold/warm), missing fields
+  leads.ts                          # computeStatus (cold/warm), missing fields, auto-close 24 jam
+  routing.ts                        # Pencocokan domisili -> wilayah agent + auto-assign
+  knowledge.ts                      # Ekstraksi teks file, memuat materi aktif, pencarian untuk bot rule-based
+  auth/access.ts                    # Aturan akses lead (Admin semua, Agent hanya miliknya)
   mitsubishi.ts                     # Katalog unit, deteksi kota, normalisasi
   whatsapp.ts                       # Kirim teks via WhatsApp Cloud API
   auth/session.ts                   # Token sesi HMAC (Web Crypto, aman di Edge middleware)
@@ -51,6 +56,7 @@ supabase/
   schema.sql                        # Instalasi BARU (v2)
   migration_v2_dipo.sql             # Upgrade database v1 -> v2 tanpa menghapus data
   migration_v3_auth.sql             # Tabel app_users (login) + pengirim pesan CS
+  migration_v4_routing_kb.sql       # Wilayah agent, penugasan lead, auto-close 24 jam, knowledge base
 vercel.json                         # Cron harian /api/cron/capi-sync
 ```
 
@@ -59,8 +65,9 @@ vercel.json                         # Cron harian /api/cron/capi-sync
 | Kondisi | Jalankan di Supabase SQL Editor |
 | --- | --- |
 | Project baru | `supabase/schema.sql` |
-| Sudah memakai v1 | `supabase/migration_v2_dipo.sql`, lalu `supabase/migration_v3_auth.sql` |
-| Sudah memakai v2 | `supabase/migration_v3_auth.sql` |
+| Sudah memakai v1 | `migration_v2_dipo.sql` → `migration_v3_auth.sql` → `migration_v4_routing_kb.sql` |
+| Sudah memakai v2 | `migration_v3_auth.sql` → `migration_v4_routing_kb.sql` |
+| Sudah memakai v3 (login sudah jalan) | `supabase/migration_v4_routing_kb.sql` |
 
 Kedua file aman dijalankan ulang. Migrasi v2 melakukan hal berikut:
 
@@ -76,10 +83,12 @@ Semua halaman dan API wajib login, kecuali `/login`, `/api/webhook` (Meta) dan `
 
 | Fitur | Admin | Agent |
 | --- | :---: | :---: |
-| Tab Inbox & Chatbot: baca chat, balas manual, ambil alih / aktifkan bot, edit nama/domisili/unit | ✅ | ✅ |
+| Inbox: baca & balas chat, ambil alih / aktifkan bot, edit nama/domisili/unit | ✅ semua lead | ✅ hanya lead yang dioper ke dirinya |
+| Oper lead manual ke agent / kembalikan ke Antrian Admin | ✅ | – |
 | Tombol simulasi (chat CTWA/organik, balasan customer) | ✅ | – |
 | Tab Meta CAPI Sync + endpoint `/api/capi/*` | ✅ | – |
-| Tab Pengguna: tambah user, ubah role, reset password, nonaktifkan | ✅ | – |
+| Tab Knowledge Base + endpoint `/api/knowledge/*` | ✅ | – |
+| Tab Pengguna: tambah user, atur wilayah agent, ubah role, reset password, nonaktifkan | ✅ | – |
 
 **Admin pertama:**
 
@@ -97,6 +106,40 @@ Semua halaman dan API wajib login, kecuali `/login`, `/api/webhook` (Meta) dan `
 - Setelah 5 kali salah password, akun dikunci 15 menit. Reset password oleh Admin langsung membuka kunci.
 - Admin tidak bisa menonaktifkan atau menurunkan role akunnya sendiri, dan sistem selalu menyisakan minimal 1 Admin aktif.
 - Balasan manual mencatat CS pengirimnya (`messages.sent_by`, `sent_by_name`). Nama tersebut tampil di bubble chat sebagai *👤 CS · Nama*.
+
+## Auto-routing Lead ke Agent (per wilayah)
+
+Setiap Agent punya daftar **wilayah** yang diatur Admin di tab **Pengguna** (mis. Agent Jakarta: `Jakarta, Depok, Bekasi, Tangerang, Bogor`).
+
+1. Chatbot mengumpulkan nama, domisili, dan unit. Begitu lengkap, lead menjadi **WARM**, bot mengirim pesan handoff, lalu nonaktif.
+2. Domisili dicocokkan dengan wilayah setiap agent aktif (`lib/routing.ts`):
+   - huruf besar/kecil dan awalan "Kota/Kabupaten/Kab." diabaikan;
+   - wilayah cocok sebagai **kata utuh**: `Jakarta` mencakup `Jakarta Selatan`, `Bandung` mencakup `Kab. Bandung Barat`, tetapi tidak `Bandungan`;
+   - bila beberapa agent cocok, wilayah paling spesifik menang (`Jakarta Selatan` > `Jakarta`); bila sama, dipilih agent dengan lead paling sedikit dalam 7 hari.
+3. **Cocok:** lead dioper ke agent tersebut dan langsung muncul di inbox-nya. **Tidak cocok:** lead masuk **Antrian Admin** dan dibalas manual oleh Admin.
+4. Admin bisa mengoper ulang secara manual dari panel **Penanganan** di roomchat. Kalau domisili dikoreksi dan lead belum punya agent, routing dicoba lagi.
+
+Agent hanya melihat dan bisa membalas lead yang dioper ke dirinya (dicek di server: HTTP 403 untuk lead lain).
+
+## Auto-close Room Chat (24 jam)
+
+- Setiap pesan (pelanggan, bot, admin, agent) memperbarui `leads.last_activity_at` lewat trigger database.
+- Jika **24 jam tanpa aktivitas**, room otomatis **CLOSED**: input pesan dikunci dan API kirim pesan menolak (HTTP 409). Tidak perlu cron; status dihitung dari waktu aktivitas terakhir.
+- Jika pelanggan mengirim chat baru, room **terbuka lagi otomatis** (lead tetap dipegang agent yang sama).
+- Catatan: WhatsApp sendiri hanya mengizinkan pesan teks bebas dalam 24 jam sejak pesan terakhir **pelanggan**. Banner kuning tetap muncul bila jendela itu sudah lewat walau room masih open karena aktivitas CS.
+
+## Knowledge Base Chatbot
+
+Tab **Knowledge Base** (Admin) berisi materi yang dibaca bot di **setiap balasan**: harga OTR per wilayah, alamat dealer, jam buka, promo, spesifikasi, FAQ.
+
+- **Upload file:** PDF (berbasis teks), Word `.docx`, Excel `.xlsx`, `.csv`, `.txt`, `.md`. Maksimal 4 MB per file, 10 file per upload. Teks diekstrak di server (`lib/knowledge.ts`); file aslinya tidak disimpan. PDF hasil scan/foto ditolak dengan pesan jelas.
+- **Tulis manual:** untuk info singkat, mis. promo bulan ini.
+- **Lihat/Edit:** koreksi teks hasil ekstraksi (mis. kolom tabel harga yang tertukar). **Aktif/nonaktif** tanpa menghapus.
+- Tidak ada training ulang: perubahan langsung berlaku di balasan bot berikutnya.
+- Batas total materi aktif: 150.000 karakter (~40 ribu token per balasan). Pemakaian tampil di bagian atas tab.
+- **Dengan AI (Gemini):** seluruh materi aktif disisipkan ke instruksi sistem. Bot diminta hanya menjawab dari materi, memakai harga OTR sesuai domisili, selalu menambahkan catatan "harga dapat berubah", dan mengoper promo/kredit final ke Sales.
+- **Tanpa API key (mode dummy):** bot rule-based mengutip baris materi yang paling relevan (mis. baris harga unit yang ditanyakan).
+- Jika pertanyaan pelanggan datang di pesan yang sama dengan pesan yang melengkapi data, bot menjawab pertanyaan itu dulu, baru mengirim pesan handoff.
 
 ## Environment Variables
 

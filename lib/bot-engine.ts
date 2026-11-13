@@ -8,6 +8,8 @@ import { buildHandoffMessage, generateBotReply, type ChatTurn } from "@/lib/chat
 import { computeStatus, isFilled } from "@/lib/leads";
 import { normalizeDomicile, normalizeName, normalizeUnit } from "@/lib/mitsubishi";
 import { sendWhatsAppText } from "@/lib/whatsapp";
+import { loadActiveKnowledge } from "@/lib/knowledge";
+import { autoAssignLead, type AgentCandidate } from "@/lib/routing";
 import type { Lead, Message } from "@/lib/types";
 
 export interface BotRunResult {
@@ -17,6 +19,8 @@ export interface BotRunResult {
   engine_error?: string;
   extracted?: { customer_name: string | null; domicile: string | null; interested_unit: string | null };
   became_warm?: boolean;
+  /** Agent yang menerima lead saat menjadi WARM (null = Antrian Admin). */
+  assigned_agent?: Pick<AgentCandidate, "id" | "full_name"> | null;
   lead?: Lead;
   reply?: Message;
 }
@@ -76,7 +80,8 @@ export async function runBotForInbound(
     .map((m) => ({ sender: m.sender_type, content: m.content, created_at: m.created_at }))
     .reverse();
 
-  const result = await generateBotReply({ lead, history });
+  const knowledge = await loadActiveKnowledge();
+  const result = await generateBotReply({ lead, history, knowledge: knowledge.text });
 
   // Isi hanya data yang masih kosong.
   const patch: Partial<Lead> = {};
@@ -119,7 +124,23 @@ export async function runBotForInbound(
     updatedLead = updated as Lead;
   }
 
-  const replyText = becameWarm ? buildHandoffMessage(updatedLead) : result.reply_message;
+  // Lead WARM -> oper otomatis ke agent yang wilayahnya cocok dengan domisili.
+  let assignedAgent: AgentCandidate | null = null;
+  if (becameWarm) {
+    try {
+      assignedAgent = await autoAssignLead(updatedLead);
+      if (assignedAgent) {
+        updatedLead = { ...updatedLead, assigned_agent_id: assignedAgent.id, assigned_at: new Date().toISOString() };
+      }
+    } catch (err) {
+      console.error("[bot-engine] auto-assign gagal:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Saat handoff, pertanyaan pelanggan di pesan yang sama tetap dijawab lebih dulu.
+  const replyText = becameWarm
+    ? [result.answer_to_question, buildHandoffMessage(updatedLead)].filter(Boolean).join("\n\n")
+    : result.reply_message;
 
   let waMessageId: string | null = null;
   let sendError: string | null = null;
@@ -153,6 +174,7 @@ export async function runBotForInbound(
       interested_unit: patch.interested_unit ?? null,
     },
     became_warm: becameWarm,
+    assigned_agent: becameWarm ? (assignedAgent ? { id: assignedAgent.id, full_name: assignedAgent.full_name } : null) : undefined,
     lead: updatedLead,
     reply: reply as Message,
   };

@@ -12,6 +12,10 @@ import {
   Hand,
   Inbox,
   Loader2,
+  Lock,
+  Route,
+  Timer,
+  UserCheck,
   Megaphone,
   MessageCircle,
   PanelRight,
@@ -25,7 +29,8 @@ import {
   X,
 } from "lucide-react";
 import { MITSUBISHI_UNITS } from "@/lib/mitsubishi";
-import type { AppConfig, Lead, LeadSource, LeadStatus, LeadWithPreview, Message, SenderType } from "@/lib/types";
+import { CHAT_CLOSE_HOURS, chatClosesAt, isChatClosed } from "@/lib/leads";
+import type { AppConfig, AppUser, Lead, LeadSource, LeadStatus, LeadWithPreview, Message, SenderType } from "@/lib/types";
 import {
   Avatar,
   Badge,
@@ -117,6 +122,10 @@ export default function InboxTab({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [search, setSearch] = useState("");
+  const [chatFilter, setChatFilter] = useState<"all" | "open" | "closed">("all");
+  const [handlerFilter, setHandlerFilter] = useState<string>("all"); // all | admin | <agent id>
+  const [agents, setAgents] = useState<AppUser[]>([]);
+  const [assigning, setAssigning] = useState(false);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -205,6 +214,14 @@ export default function InboxTab({
     }
   }, [messages]);
 
+  // Daftar agent (Admin) untuk filter & oper manual.
+  useEffect(() => {
+    if (!active || !isAdmin) return;
+    api<{ users: AppUser[] }>("/api/users")
+      .then((res) => setAgents(res.users.filter((u) => u.role === "agent" && u.is_active)))
+      .catch(() => undefined);
+  }, [active, isAdmin]);
+
   // ---------------- Derived ----------------
   const filteredLeads = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -212,6 +229,14 @@ export default function InboxTab({
     return leads
       .filter((l) => statusFilter === "all" || l.status === statusFilter)
       .filter((l) => sourceFilter === "all" || l.source === sourceFilter)
+      .filter((l) => chatFilter === "all" || (chatFilter === "closed") === isChatClosed(l))
+      .filter((l) =>
+        handlerFilter === "all"
+          ? true
+          : handlerFilter === "admin"
+            ? !l.assigned_agent_id
+            : l.assigned_agent_id === handlerFilter,
+      )
       .filter((l) => {
         if (!q) return true;
         const text = [l.customer_name, l.wa_profile_name, l.domicile, l.interested_unit].join(" ").toLowerCase();
@@ -221,7 +246,7 @@ export default function InboxTab({
         );
       })
       .sort((a, b) => lastActivity(b) - lastActivity(a));
-  }, [leads, statusFilter, sourceFilter, search]);
+  }, [leads, statusFilter, sourceFilter, chatFilter, handlerFilter, search]);
 
   const counts = useMemo(
     () => ({
@@ -235,6 +260,8 @@ export default function InboxTab({
   const lead: Lead | null = activeLead ?? leads.find((l) => l.id === selectedId) ?? null;
   const outside24h = lead ? Date.now() - new Date(lead.last_customer_message_at).getTime() >= WINDOW_24H_MS : false;
   const canSimulateReply = Boolean(isAdmin && lead && (config?.mock_mode || lead.is_simulated));
+  const closed = lead ? isChatClosed(lead) : false;
+  const hoursToClose = lead ? Math.max(0, (chatClosesAt(lead).getTime() - Date.now()) / 3_600_000) : 0;
   const qualDone = lead ? QUAL_ITEMS.filter((i) => Boolean(lead[i.key]?.trim())).length : 0;
 
   // ---------------- Actions ----------------
@@ -261,14 +288,28 @@ export default function InboxTab({
     setSimReplying(true);
     setChatError(null);
     try {
-      const res = await api<{ bot: { ran: boolean; became_warm?: boolean; engine?: string; engine_error?: string; lead?: Lead } }>(
+      const res = await api<{
+        bot: {
+          ran: boolean;
+          became_warm?: boolean;
+          engine?: string;
+          engine_error?: string;
+          lead?: Lead;
+          assigned_agent?: { id: string; full_name: string } | null;
+        };
+      }>(
         "/api/simulate/reply",
         { method: "POST", body: JSON.stringify({ lead_id: lead.id, text: text?.trim() || undefined }) },
       );
       setSimText("");
       applyLead(res.bot.lead);
       if (res.bot.became_warm) {
-        setNotice({ type: "success", text: "🔥 Data lengkap! Lead otomatis menjadi WARM dan chat diserahkan ke CS/Sales (bot nonaktif)." });
+        setNotice({
+          type: "success",
+          text: res.bot.assigned_agent
+            ? `🔥 Data lengkap! Lead WARM otomatis dioper ke ${res.bot.assigned_agent.full_name} (wilayah cocok dengan domisili). Bot nonaktif.`
+            : "🔥 Data lengkap! Lead WARM, tetapi tidak ada wilayah agent yang cocok — masuk Antrian Admin. Bot nonaktif.",
+        });
       } else if (res.bot.engine_error) {
         setNotice({ type: "info", text: `Gemini gagal, bot memakai fallback rule-based: ${res.bot.engine_error}` });
       }
@@ -300,9 +341,11 @@ export default function InboxTab({
     }
   }
 
-  async function patchLead(body: Partial<Pick<Lead, "customer_name" | "domicile" | "interested_unit" | "bot_active">>) {
+  async function patchLead(
+    body: Partial<Pick<Lead, "customer_name" | "domicile" | "interested_unit" | "bot_active" | "assigned_agent_id">>,
+  ) {
     if (!lead) return null;
-    const res = await api<{ lead: Lead; became_warm: boolean }>(`/api/leads/${lead.id}`, {
+    const res = await api<{ lead: Lead; became_warm: boolean; auto_assigned: { id: string; full_name: string } | null }>(`/api/leads/${lead.id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
@@ -320,6 +363,22 @@ export default function InboxTab({
       setChatError(errText(err));
     } finally {
       setTogglingBot(false);
+    }
+  }
+
+  async function assignTo(agentId: string | null) {
+    setAssigning(true);
+    setNotice(null);
+    try {
+      const res = await patchLead({ assigned_agent_id: agentId });
+      setNotice({
+        type: "info",
+        text: res?.lead.assigned_agent?.full_name ? `Lead dioper ke ${res.lead.assigned_agent.full_name}.` : "Lead dikembalikan ke Antrian Admin.",
+      });
+    } catch (err) {
+      setNotice({ type: "error", text: errText(err) });
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -346,7 +405,12 @@ export default function InboxTab({
       });
       setEditing(false);
       if (res?.became_warm) {
-        setNotice({ type: "success", text: "🔥 Ketiga data lengkap — status otomatis berubah menjadi WARM. Bot dinonaktifkan (handoff ke CS/Sales)." });
+        setNotice({
+          type: "success",
+          text: `🔥 Ketiga data lengkap — status otomatis WARM, bot dinonaktifkan. ${
+            res.auto_assigned ? `Lead dioper ke ${res.auto_assigned.full_name}.` : res.lead.assigned_agent_id ? "" : "Tidak ada wilayah agent yang cocok — tetap di Antrian Admin."
+          }`,
+        });
       } else {
         setNotice({
           type: "info",
@@ -431,6 +495,34 @@ export default function InboxTab({
               </button>
             ))}
           </div>
+          <div className="mt-2 flex gap-2">
+            <select
+              value={chatFilter}
+              onChange={(e) => setChatFilter(e.target.value as typeof chatFilter)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+              aria-label="Filter status chat"
+            >
+              <option value="all">Semua chat</option>
+              <option value="open">🟢 Open</option>
+              <option value="closed">🔒 Closed</option>
+            </select>
+            {isAdmin && (
+              <select
+                value={handlerFilter}
+                onChange={(e) => setHandlerFilter(e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+                aria-label="Filter penanganan"
+              >
+                <option value="all">Semua penanganan</option>
+                <option value="admin">Antrian Admin</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.full_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
 
         {listError && (
@@ -449,7 +541,7 @@ export default function InboxTab({
               {leads.length === 0
                 ? isAdmin
                   ? "Belum ada chat. Klik tombol simulasi untuk mengetes chatbot dari awal."
-                  : "Belum ada chat masuk."
+                  : "Belum ada lead yang dioper ke Anda. Lead WARM dari wilayah Anda akan muncul di sini otomatis."
                 : "Tidak ada prospek yang cocok dengan filter/pencarian."}
             </li>
           )}
@@ -498,6 +590,21 @@ export default function InboxTab({
                           <Hand className="h-3 w-3" /> Manual
                         </Badge>
                       )}
+                      {isAdmin && l.assigned_agent?.full_name && (
+                        <Badge className="bg-indigo-50 text-indigo-700 ring-indigo-200" title="Dipegang agent">
+                          <UserCheck className="h-3 w-3" /> {l.assigned_agent.full_name}
+                        </Badge>
+                      )}
+                      {isAdmin && !l.assigned_agent_id && l.status === "warm" && (
+                        <Badge className="bg-rose-50 text-rose-700 ring-rose-200" title="Tidak ada wilayah agent yang cocok">
+                          <Route className="h-3 w-3" /> Antrian Admin
+                        </Badge>
+                      )}
+                      {isChatClosed(l) && (
+                        <Badge className="bg-slate-200 text-slate-600 ring-slate-300">
+                          <Lock className="h-3 w-3" /> Closed
+                        </Badge>
+                      )}
                     </div>
                   </div>
                 </button>
@@ -543,6 +650,11 @@ export default function InboxTab({
                     )}
                   </p>
                   <StatusTag status={lead.status} />
+                  {closed && (
+                    <Badge className="bg-slate-200 text-slate-600 ring-slate-300">
+                      <Lock className="h-3 w-3" /> CLOSED
+                    </Badge>
+                  )}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                   <span className="inline-flex items-center gap-1 font-mono">
@@ -563,7 +675,7 @@ export default function InboxTab({
               </button>
             </header>
 
-            {outside24h && (
+            {outside24h && !closed && (
               <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>
@@ -698,7 +810,17 @@ export default function InboxTab({
               </div>
             )}
 
-            {/* Input CS */}
+            {/* Input CS (atau info chat ditutup) */}
+            {closed ? (
+              <div className="flex items-start gap-3 border-t border-slate-300 bg-slate-100 px-4 py-3 text-xs text-slate-600">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                <p>
+                  <span className="font-semibold text-slate-800">Chat ditutup otomatis</span> — tidak ada aktivitas dari pelanggan, admin,
+                  maupun agent selama {CHAT_CLOSE_HOURS} jam (sejak {formatDateTime(chatClosesAt(lead).toISOString())}). Pesan tidak bisa
+                  dikirim. Room akan terbuka lagi otomatis jika pelanggan mengirim chat baru.
+                </p>
+              </div>
+            ) : (
             <div className="border-t border-slate-200 bg-[#f0f2f5] px-3 py-3 sm:px-4">
               {chatError && (
                 <div className="mb-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -739,7 +861,13 @@ export default function InboxTab({
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>
               </form>
+              <p className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-500">
+                <Timer className="h-3 w-3" />
+                Auto-close dalam {hoursToClose >= 1 ? `${Math.floor(hoursToClose)} jam` : `${Math.max(1, Math.round(hoursToClose * 60))} menit`} jika tidak
+                ada aktivitas.
+              </p>
             </div>
+            )}
           </>
         )}
       </section>
@@ -766,6 +894,55 @@ export default function InboxTab({
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            <Card title="Penanganan" icon={<Route className="h-3.5 w-3.5" />}>
+              <dl className="space-y-3">
+                <InfoRow label="Dipegang oleh">
+                  {lead.assigned_agent_id ? (
+                    <span className="inline-flex items-center gap-1.5 font-medium text-indigo-700">
+                      <UserCheck className="h-4 w-4" /> {lead.assigned_agent?.full_name ?? "Agent"}
+                    </span>
+                  ) : lead.status === "warm" ? (
+                    <span className="font-medium text-rose-700">Antrian Admin (tidak ada wilayah agent yang cocok)</span>
+                  ) : (
+                    <span className="text-slate-600">Bot / Admin — dioper otomatis setelah lead WARM</span>
+                  )}
+                  {lead.assigned_at && (
+                    <span className="mt-0.5 block text-[11px] text-slate-500">Sejak {formatDateTime(lead.assigned_at)}</span>
+                  )}
+                </InfoRow>
+                {isAdmin && (
+                  <InfoRow label="Oper manual">
+                    <select
+                      value={lead.assigned_agent_id ?? ""}
+                      disabled={assigning}
+                      onChange={(e) => void assignTo(e.target.value || null)}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm disabled:opacity-60"
+                      aria-label="Oper lead ke agent"
+                    >
+                      <option value="">Antrian Admin</option>
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.full_name}
+                          {a.regions?.length ? ` — ${a.regions.slice(0, 3).join(", ")}${a.regions.length > 3 ? "…" : ""}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </InfoRow>
+                )}
+                <InfoRow label="Status chat">
+                  {closed ? (
+                    <span className="inline-flex items-center gap-1 text-slate-600">
+                      <Lock className="h-3.5 w-3.5" /> Closed sejak {formatDateTime(chatClosesAt(lead).toISOString())}
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700">
+                      🟢 Open — auto-close {formatDateTime(chatClosesAt(lead).toISOString())} bila tidak ada aktivitas
+                    </span>
+                  )}
+                </InfoRow>
+              </dl>
+            </Card>
 
             <Card title="Customer Info" icon={<UserRound className="h-3.5 w-3.5" />}>
               <dl className="space-y-3">

@@ -7,7 +7,7 @@ import { USER_HEADERS } from "@/lib/auth/users";
  *
  * - Publik      : /login, /api/auth/login, /api/auth/logout,
  *                 /api/webhook (Meta), /api/cron/capi-sync (dilindungi CRON_SECRET).
- * - Admin saja  : /api/capi/*, /api/users/*, /api/simulate/*
+ * - Admin saja  : /api/capi/*, /api/users/*, /api/simulate/*, /api/knowledge/*
  * - Admin+Agent : sisanya (inbox, kirim pesan, edit lead).
  *
  * Status aktif, role & session_version user dibaca dari database pada setiap
@@ -16,7 +16,7 @@ import { USER_HEADERS } from "@/lib/auth/users";
  */
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout", "/api/webhook", "/api/cron/capi-sync"];
-const ADMIN_ONLY_PATHS = ["/api/capi", "/api/users", "/api/simulate"];
+const ADMIN_ONLY_PATHS = ["/api/capi", "/api/users", "/api/simulate", "/api/knowledge"];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, Plus, ShieldCheck, UserCog, UserRound, X } from "lucide-react";
+import { KeyRound, Loader2, MapPin, Plus, ShieldCheck, UserCog, UserRound, X } from "lucide-react";
 import type { AppUser, UserRole } from "@/lib/types";
 import { Badge, api, errText, formatDateTime, relativeTime } from "@/components/ui";
 
@@ -30,11 +30,14 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
   const [notice, setNotice] = useState<Notice>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ full_name: "", email: "", role: "agent" as UserRole, password: "" });
+  const [form, setForm] = useState({ full_name: "", email: "", role: "agent" as UserRole, password: "", regions: "" });
   const [creating, setCreating] = useState(false);
 
   const [resetUser, setResetUser] = useState<AppUser | null>(null);
   const [resetPassword, setResetPassword] = useState("");
+
+  const [regionUser, setRegionUser] = useState<AppUser | null>(null);
+  const [regionText, setRegionText] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -55,8 +58,11 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
     setCreating(true);
     setNotice(null);
     try {
-      const res = await api<{ user: AppUser }>("/api/users", { method: "POST", body: JSON.stringify(form) });
-      setForm({ full_name: "", email: "", role: "agent", password: "" });
+      const res = await api<{ user: AppUser }>("/api/users", {
+        method: "POST",
+        body: JSON.stringify({ ...form, regions: form.role === "agent" ? form.regions : [] }),
+      });
+      setForm({ full_name: "", email: "", role: "agent", password: "", regions: "" });
       setNotice({ type: "success", text: `Akun ${res.user.full_name} (${ROLE_LABEL[res.user.role]}) berhasil dibuat.` });
       await load();
     } catch (err) {
@@ -66,7 +72,11 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
     }
   }
 
-  async function patchUser(user: AppUser, body: Partial<Pick<AppUser, "role" | "is_active">> & { password?: string }, success: string) {
+  async function patchUser(
+    user: AppUser,
+    body: Partial<Pick<AppUser, "role" | "is_active">> & { password?: string; regions?: string },
+    success: string,
+  ) {
     setBusyId(user.id);
     setNotice(null);
     try {
@@ -90,7 +100,9 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
             <UserCog className="h-5 w-5 text-red-600" /> Kelola Pengguna
           </h2>
           <p className="mt-0.5 text-sm text-slate-500">
-            <b>Admin</b> dapat mengakses semua fitur. <b>Agent</b> hanya dapat mengakses Inbox & Chatbot.
+            <b>Admin</b> dapat mengakses semua fitur. <b>Agent</b> hanya melihat lead WARM yang dioper otomatis ke dirinya, berdasarkan
+            kecocokan <b>domisili pelanggan</b> dengan <b>wilayah agent</b>. Lead yang domisilinya tidak cocok dengan agent mana pun ditangani
+            Admin.
           </p>
         </div>
 
@@ -145,6 +157,19 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
               className={inputClass}
             />
           </div>
+          {form.role === "agent" && (
+            <label className="mt-3 block">
+              <span className="mb-1 flex items-center gap-1 text-xs font-medium text-slate-600">
+                <MapPin className="h-3.5 w-3.5" /> Wilayah agent (pisahkan dengan koma)
+              </span>
+              <input
+                value={form.regions}
+                onChange={(e) => setForm((f) => ({ ...f, regions: e.target.value }))}
+                placeholder="mis. Jakarta, Depok, Bekasi, Tangerang, Bogor"
+                className={inputClass}
+              />
+            </label>
+          )}
           <div className="mt-3 flex justify-end">
             <button
               type="submit"
@@ -161,11 +186,12 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
           {loadError && <div className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{loadError}</div>}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">Nama & Email</th>
                   <th className="px-4 py-2.5 font-medium">Role</th>
+                  <th className="px-4 py-2.5 font-medium">Wilayah</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 font-medium">Login Terakhir</th>
                   <th className="px-4 py-2.5 text-right font-medium">Aksi</th>
@@ -174,7 +200,7 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
               <tbody className="divide-y divide-slate-100">
                 {!users && !loadError && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center">
+                    <td colSpan={6} className="px-4 py-8 text-center">
                       <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-400" />
                     </td>
                   </tr>
@@ -207,6 +233,33 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
                             <option value="agent">Agent</option>
                             <option value="admin">Admin</option>
                           </select>
+                        )}
+                      </td>
+                      <td className="max-w-[260px] px-4 py-3">
+                        {u.role === "agent" ? (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {(u.regions ?? []).length === 0 ? (
+                              <span className="text-xs text-amber-700">Belum diatur — tidak akan menerima lead otomatis</span>
+                            ) : (
+                              u.regions.map((r) => (
+                                <Badge key={r} className="bg-indigo-50 text-indigo-700 ring-indigo-200">
+                                  {r}
+                                </Badge>
+                              ))
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRegionUser(u);
+                                setRegionText((u.regions ?? []).join(", "));
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                            >
+                              <MapPin className="h-3 w-3" /> Atur
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">Semua (Admin)</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -263,6 +316,57 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
           </div>
         </div>
       </div>
+
+      {/* Modal wilayah agent */}
+      {regionUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setRegionUser(null)}>
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-label="Atur wilayah agent"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await patchUser(regionUser, { regions: regionText }, `Wilayah ${regionUser.full_name} disimpan.`);
+              if (ok) setRegionUser(null);
+            }}
+            className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                <MapPin className="h-4 w-4 text-red-600" /> Wilayah {regionUser.full_name}
+              </h3>
+              <button type="button" onClick={() => setRegionUser(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label="Tutup">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              rows={4}
+              value={regionText}
+              onChange={(e) => setRegionText(e.target.value)}
+              placeholder="Jakarta, Depok, Bekasi, Tangerang, Bogor"
+              className={`${inputClass} resize-y`}
+            />
+            <ul className="mt-2 list-inside list-disc space-y-0.5 text-[11px] text-slate-500">
+              <li>Pisahkan dengan koma atau baris baru.</li>
+              <li>
+                Wilayah cocok sebagai kata utuh: &quot;Jakarta&quot; mencakup &quot;Jakarta Selatan&quot;, &quot;Bandung&quot; mencakup &quot;Bandung
+                Barat&quot;.
+              </li>
+              <li>Jika dua agent sama-sama cocok, wilayah yang lebih spesifik menang; bila sama, dipilih agent dengan lead paling sedikit.</li>
+            </ul>
+            <button
+              type="submit"
+              disabled={busyId === regionUser.id}
+              className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+            >
+              {busyId === regionUser.id && <Loader2 className="h-4 w-4 animate-spin" />}
+              Simpan Wilayah
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Modal reset password */}
       {resetUser && (

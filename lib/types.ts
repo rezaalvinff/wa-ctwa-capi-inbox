@@ -25,6 +25,12 @@ export interface Lead {
   capi_synced_at: string | null;
   last_capi_response: Record<string, unknown> | null;
   last_customer_message_at: string;
+  /** Pesan terakhir dari siapa pun (customer/bot/admin/agent). Dasar auto-close 24 jam. */
+  last_activity_at: string;
+  assigned_agent_id: string | null;
+  assigned_at: string | null;
+  /** Diisi API (join ke app_users) bila lead sudah dioper ke agent. */
+  assigned_agent?: { id: string; full_name: string } | null;
   created_at: string;
 }
 
@@ -90,8 +96,24 @@ export interface AppUser {
   email: string;
   full_name: string;
   role: UserRole;
+  /** Wilayah yang dipegang agent, dipakai untuk auto-routing lead WARM. */
+  regions: string[];
   is_active: boolean;
   last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeItem {
+  id: string;
+  title: string;
+  source_type: "file" | "manual";
+  file_name: string | null;
+  file_type: string | null;
+  file_size: number | null;
+  content: string;
+  is_active: boolean;
+  created_by_name: string | null;
   created_at: string;
   updated_at: string;
 }
