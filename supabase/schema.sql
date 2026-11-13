@@ -2,7 +2,9 @@
 -- Mitsubishi DIPO Lead & CAPI Hub - Supabase schema (v2, instalasi baru)
 --
 -- Instalasi baru  : jalankan file ini di Supabase Dashboard > SQL Editor.
--- Upgrade dari v1 : JANGAN jalankan file ini, gunakan migration_v2_dipo.sql.
+-- Upgrade dari v1 : JANGAN jalankan file ini, gunakan migration_v2_dipo.sql
+--                   lalu migration_v3_auth.sql.
+-- Upgrade dari v2 : jalankan migration_v3_auth.sql saja.
 -- Aman dijalankan ulang (idempotent).
 -- =====================================================================
 
@@ -80,6 +82,26 @@ create trigger leads_auto_tag_trg
   for each row execute function public.leads_auto_tag();
 
 -- ---------------------------------------------------------------------
+-- Tabel: app_users (login admin / agent)
+-- ---------------------------------------------------------------------
+create table if not exists public.app_users (
+  id                  uuid primary key default gen_random_uuid(),
+  email               text not null unique check (email = lower(email)),
+  full_name           text not null,
+  role                text not null default 'agent' check (role in ('admin', 'agent')),
+  password_hash       text not null,                  -- scrypt (lib/auth/password.ts)
+  is_active           boolean not null default true,
+  session_version     integer not null default 1,     -- dinaikkan untuk memaksa logout
+  failed_login_count  integer not null default 0,
+  locked_until        timestamptz,
+  last_login_at       timestamptz,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+create index if not exists app_users_role_idx on public.app_users (role);
+
+-- ---------------------------------------------------------------------
 -- Tabel: messages
 -- ---------------------------------------------------------------------
 create table if not exists public.messages (
@@ -91,6 +113,8 @@ create table if not exists public.messages (
                    constraint messages_sender_type_check check (sender_type in ('customer', 'bot', 'cs')),
   content        text not null default '',
   send_error     text,                                        -- error WhatsApp API bila gagal terkirim
+  sent_by        uuid references public.app_users (id) on delete set null, -- CS pengirim (manual)
+  sent_by_name   text,
   created_at     timestamptz not null default now()
 );
 
@@ -103,8 +127,16 @@ create index if not exists messages_lead_id_created_at_idx
 -- SUPABASE_SERVICE_ROLE_KEY. RLS diaktifkan supaya anon key / akses
 -- publik tidak bisa membaca data lead (nomor HP pelanggan).
 -- ---------------------------------------------------------------------
-alter table public.leads    enable row level security;
-alter table public.messages enable row level security;
+alter table public.leads     enable row level security;
+alter table public.messages  enable row level security;
+alter table public.app_users enable row level security;
+
+drop policy if exists "service_role full access app_users" on public.app_users;
+create policy "service_role full access app_users"
+  on public.app_users for all
+  to service_role
+  using (true)
+  with check (true);
 
 drop policy if exists "service_role full access leads" on public.leads;
 create policy "service_role full access leads"

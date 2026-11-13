@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { errorMessage, jsonError } from "@/lib/http";
 import { isMockMode } from "@/lib/config";
 import { sendWhatsAppText } from "@/lib/whatsapp";
+import { getRequestUser } from "@/lib/auth/users";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,8 @@ export async function POST(req: NextRequest) {
   if (!leadId) return jsonError("lead_id wajib diisi.");
   if (!text) return jsonError("text wajib diisi.");
   if (text.length > 4096) return jsonError("text maksimal 4096 karakter.");
+
+  const agent = getRequestUser(req);
 
   try {
     const supabase = getSupabaseAdmin();
@@ -60,6 +63,8 @@ export async function POST(req: NextRequest) {
         direction: "outbound",
         sender_type: "cs",
         content: text,
+        sent_by: agent?.id ?? null,
+        sent_by_name: agent?.full_name || null,
       })
       .select("*")
       .single();
