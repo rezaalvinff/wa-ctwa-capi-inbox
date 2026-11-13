@@ -134,15 +134,30 @@ Payload per lead (event dikirim satu per satu agar log per lead jelas, 5 paralel
     "event_id": "<lead_id>_Lead",
     "action_source": "business_messaging",
     "messaging_channel": "whatsapp",
-    "user_data": { "ph": ["<sha256 628xxx>"], "ctwa_clid": "ARAk..." },
+    "user_data": {
+      "ctwa_clid": "ARAk...",
+      "ph": ["<sha256 628xxx>"],
+      "fn": ["<sha256 nama depan>"],
+      "ln": ["<sha256 nama belakang>"]
+    },
     "custom_data": { "content_name": "Xpander Cross", "content_category": "Bekasi" }
   }],
   "test_event_code": "TEST12345"
 }
 ```
 
-- `event_time` memakai `warm_at` (kapan lead menjadi warm) bila masih dalam 7 hari; selain itu memakai waktu kirim.
-- Jika sukses (HTTP 200): `'Lead'` ditambahkan ke `capi_sent_events` dan `capi_synced_at` diisi. Sukses maupun gagal, response Meta disimpan di `last_capi_response`.
+| Parameter | Isi |
+| --- | --- |
+| `event_name` | `Lead` (prospek sudah tervalidasi / `warm`) |
+| `event_time` | Unix timestamp (detik) saat lead menjadi warm (`warm_at`), atau waktu kirim bila `warm_at` sudah lewat 7 hari |
+| `event_id` | `<lead_id>_Lead`, unik per lead untuk deduplikasi di Events Manager |
+| `action_source` / `messaging_channel` | `business_messaging` / `whatsapp` |
+| `user_data.ctwa_clid` | Click ID iklan CTWA, kunci atribusi, **tidak di-hash** |
+| `user_data.ph` | Nomor dinormalisasi ke `628xxx` lalu SHA-256 |
+| `user_data.fn` / `ln` | Opsional. Dari `customer_name` (fallback `wa_profile_name`); sapaan Pak/Bu/Kak dan teks dalam kurung dibuang; huruf kecil, tanpa tanda baca/angka (aksen tetap UTF-8), lalu SHA-256. `fn` = kata pertama, `ln` = kata terakhir; `ln` tidak dikirim untuk nama satu kata dan inisial satu huruf diabaikan. |
+| `custom_data` | Opsional: `content_name` = unit diminati, `content_category` = domisili |
+
+- Jika sukses (HTTP 200): `'Lead'` ditambahkan ke `capi_sent_events` dan `capi_synced_at` diisi. Sukses maupun gagal, response Meta (beserta payload request dan `name_source` asal `fn`/`ln`) disimpan di `last_capi_response`.
 - `event_id` yang konsisten juga membuat Meta men-deduplikasi bila sync manual dan cron berjalan bersamaan.
 
 Cron di `vercel.json` berjalan `0 2 * * *` (UTC) = **09:00 WIB** setiap hari. Jika mengubah jadwal, ubah juga `CRON_SCHEDULE`/`CRON_LABEL` di `lib/config.ts` agar label di UI sama.

@@ -3,7 +3,8 @@
  * Click-to-WhatsApp Meta Ads dalam 7 hari terakhir.
  */
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { hashPhone } from "@/lib/phone";
+import { hashPhone, sha256Hex } from "@/lib/phone";
+import { normalizeName } from "@/lib/mitsubishi";
 import { CAPI_WINDOW_DAYS, hasCapiConfig } from "@/lib/config";
 import { GRAPH_API_VERSION, errorMessage } from "@/lib/http";
 import type { CapiSyncLeadLog, CapiSyncSummary, Lead, WarmCapiLead } from "@/lib/types";
@@ -64,11 +65,51 @@ function eventTime(lead: Lead): number {
   return Math.floor(t / 1000);
 }
 
-function buildPayload(lead: Lead): Record<string, unknown> {
+/** Normalisasi token nama sesuai aturan Meta: huruf kecil, tanpa tanda baca/angka/spasi, aksen tetap (UTF-8). */
+function normalizeNameToken(token: string): string {
+  return token.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{M}]/gu, "");
+}
+
+export interface NameHashes {
+  fn: string | null;
+  ln: string | null;
+  source: "customer_name" | "wa_profile_name" | null;
+}
+
+/**
+ * fn/ln (SHA-256) dari nama prospek. Prioritas: customer_name (terkonfirmasi chatbot/CS),
+ * fallback wa_profile_name. Sapaan (Pak/Bu/Kak) & teks dalam kurung dibuang.
+ * fn = kata pertama, ln = kata terakhir (hanya jika nama > 1 kata, inisial 1 huruf diabaikan).
+ */
+export function buildNameHashes(lead: Pick<Lead, "customer_name" | "wa_profile_name">): NameHashes {
+  const candidates: Array<[NameHashes["source"], string | null]> = [
+    ["customer_name", lead.customer_name],
+    ["wa_profile_name", lead.wa_profile_name],
+  ];
+  for (const [source, raw] of candidates) {
+    if (!raw) continue;
+    const cleaned = normalizeName(raw.replace(/\(.*?\)|\[.*?\]/g, " "));
+    if (!cleaned) continue;
+    // Inisial 1 huruf (mis. "Budi S") tidak berguna untuk pencocokan -> dibuang.
+    const tokens = cleaned.split(/\s+/).map(normalizeNameToken).filter((t) => t.length > 1);
+    if (tokens.length === 0) continue;
+    return {
+      fn: sha256Hex(tokens[0]),
+      ln: tokens.length > 1 ? sha256Hex(tokens[tokens.length - 1]) : null,
+      source,
+    };
+  }
+  return { fn: null, ln: null, source: null };
+}
+
+function buildPayload(lead: Lead): { payload: Record<string, unknown>; nameSource: NameHashes["source"] } {
+  const names = buildNameHashes(lead);
   const userData: Record<string, unknown> = {
-    ph: [hashPhone(lead.phone_number)],
-    ctwa_clid: lead.ctwa_clid, // tidak di-hash
+    ctwa_clid: lead.ctwa_clid, // kunci atribusi CTWA, TIDAK di-hash
+    ph: [hashPhone(lead.phone_number)], // 628xxx -> SHA-256
   };
+  if (names.fn) userData.fn = [names.fn];
+  if (names.ln) userData.ln = [names.ln];
   if (process.env.WA_BUSINESS_ACCOUNT_ID?.trim()) {
     userData.whatsapp_business_account_id = process.env.WA_BUSINESS_ACCOUNT_ID.trim();
   }
@@ -91,12 +132,12 @@ function buildPayload(lead: Lead): Record<string, unknown> {
   };
   const testEventCode = process.env.META_TEST_EVENT_CODE?.trim();
   if (testEventCode) payload.test_event_code = testEventCode;
-  return payload;
+  return { payload, nameSource: names.source };
 }
 
 async function sendLeadEvent(lead: Lead): Promise<CapiSyncLeadLog> {
   const supabase = getSupabaseAdmin();
-  const payload = buildPayload(lead);
+  const { payload, nameSource } = buildPayload(lead);
 
   let httpStatus = 0;
   let response: unknown;
@@ -131,6 +172,7 @@ async function sendLeadEvent(lead: Lead): Promise<CapiSyncLeadLog> {
     success,
     sent_at: sentAt,
     test_event_code: process.env.META_TEST_EVENT_CODE?.trim() || null,
+    name_source: nameSource, // asal fn/ln: customer_name | wa_profile_name | null
     request_payload: payload, // tanpa access token
     response,
   };

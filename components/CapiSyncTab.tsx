@@ -178,8 +178,11 @@ export default function CapiSyncTab({
               </p>
               <p className="text-xs text-slate-500">
                 Event <code className="rounded bg-white px-1 ring-1 ring-slate-200">Lead</code> dengan action_source{" "}
-                <code className="rounded bg-white px-1 ring-1 ring-slate-200">business_messaging</code>, nomor HP di-hash SHA-256,
-                content_name = unit, content_category = domisili. Setiap lead hanya dikirim sekali.
+                <code className="rounded bg-white px-1 ring-1 ring-slate-200">business_messaging</code> via WhatsApp. user_data:{" "}
+                <code className="rounded bg-white px-1 ring-1 ring-slate-200">ctwa_clid</code> (tanpa hash),{" "}
+                <code className="rounded bg-white px-1 ring-1 ring-slate-200">ph</code> dan nama{" "}
+                <code className="rounded bg-white px-1 ring-1 ring-slate-200">fn</code>/<code className="rounded bg-white px-1 ring-1 ring-slate-200">ln</code>{" "}
+                (SHA-256). Setiap lead hanya dikirim sekali (event_id unik).
               </p>
               <div className="flex flex-wrap gap-2">
                 {config && !config.capi_configured && (
