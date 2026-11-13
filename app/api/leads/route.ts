@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { errorMessage, jsonError } from "@/lib/http";
-import type { LeadWithPreview, Message } from "@/lib/types";
+import type { LeadWithPreview, MessagePreview } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export async function GET() {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
       .from("leads")
-      .select("*, messages(content, direction, created_at)")
+      .select("*, messages(content, direction, sender_type, created_at)")
       .order("last_customer_message_at", { ascending: false })
       .order("created_at", { referencedTable: "messages", ascending: false })
       .limit(1, { referencedTable: "messages" })
@@ -20,9 +20,7 @@ export async function GET() {
     if (error) throw error;
 
     const leads: LeadWithPreview[] = (data ?? []).map((row) => {
-      const { messages, ...lead } = row as LeadWithPreview & {
-        messages?: Pick<Message, "content" | "direction" | "created_at">[];
-      };
+      const { messages, ...lead } = row as LeadWithPreview & { messages?: MessagePreview[] };
       return { ...lead, last_message: messages?.[0] ?? null };
     });
 
