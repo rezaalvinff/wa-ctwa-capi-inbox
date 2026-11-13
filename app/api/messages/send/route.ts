@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { errorMessage, GRAPH_API_VERSION, jsonError } from "@/lib/http";
+import { errorMessage, jsonError } from "@/lib/http";
+import { isMockMode } from "@/lib/config";
+import { sendWhatsAppText } from "@/lib/whatsapp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,11 +12,7 @@ interface SendBody {
   text?: string;
 }
 
-interface WaSendResponse {
-  messages?: Array<{ id: string }>;
-  error?: { message?: string; code?: number; error_subcode?: number; type?: string };
-}
-
+/** POST /api/messages/send - balasan manual CS (sender_type: 'cs'). */
 export async function POST(req: NextRequest) {
   let body: SendBody;
   try {
@@ -34,50 +32,24 @@ export async function POST(req: NextRequest) {
 
     const { data: lead, error: leadError } = await supabase
       .from("leads")
-      .select("id, phone_number")
+      .select("id, phone_number, is_simulated")
       .eq("id", leadId)
       .maybeSingle();
     if (leadError) throw leadError;
     if (!lead) return jsonError("Lead tidak ditemukan.", 404);
 
-    const mockMode = process.env.MOCK_MODE === "true";
+    // Lead simulasi tidak pernah dikirim ke WhatsApp (nomor acak bisa milik orang lain).
+    const mock = isMockMode() || Boolean(lead.is_simulated);
     let waMessageId: string | null = null;
 
-    if (!mockMode) {
-      const phoneNumberId = process.env.WA_PHONE_NUMBER_ID;
-      const accessToken = process.env.WA_ACCESS_TOKEN;
-      if (!phoneNumberId || !accessToken) {
-        return jsonError("WA_PHONE_NUMBER_ID dan WA_ACCESS_TOKEN wajib diisi (atau set MOCK_MODE=true).", 500);
+    if (!mock) {
+      const sent = await sendWhatsAppText(lead.phone_number, text);
+      if (!sent.ok) {
+        return jsonError(sent.error ?? "Gagal mengirim ke WhatsApp.", sent.status >= 400 ? sent.status : 502, {
+          meta_error: sent.raw,
+        });
       }
-
-      const waRes = await fetch(
-        `https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            recipient_type: "individual",
-            to: lead.phone_number,
-            type: "text",
-            text: { preview_url: false, body: text },
-          }),
-          cache: "no-store",
-        },
-      );
-
-      const waJson = (await waRes.json().catch(() => ({}))) as WaSendResponse;
-      if (!waRes.ok) {
-        return jsonError(
-          waJson.error?.message ?? `WhatsApp API error (HTTP ${waRes.status})`,
-          waRes.status >= 400 && waRes.status < 600 ? waRes.status : 502,
-          { meta_error: waJson.error ?? waJson },
-        );
-      }
-      waMessageId = waJson.messages?.[0]?.id ?? null;
+      waMessageId = sent.wa_message_id;
     }
 
     const { data: message, error: msgError } = await supabase
@@ -86,13 +58,14 @@ export async function POST(req: NextRequest) {
         lead_id: lead.id,
         wa_message_id: waMessageId,
         direction: "outbound",
+        sender_type: "cs",
         content: text,
       })
       .select("*")
       .single();
     if (msgError) throw msgError;
 
-    return NextResponse.json({ ok: true, mock: mockMode, message });
+    return NextResponse.json({ ok: true, mock, message });
   } catch (err) {
     console.error("[messages/send]", errorMessage(err));
     return jsonError(errorMessage(err), 500);

@@ -1,11 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { normalizePhone } from "@/lib/phone";
 import { errorMessage } from "@/lib/http";
+import { runBotForInbound } from "@/lib/bot-engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Chatbot (Gemini) berjalan setelah respons 200 dikirim via after().
+export const maxDuration = 60;
+
+/** Jeda singkat agar pesan beruntun pelanggan dibalas sekali saja. */
+const BOT_DEBOUNCE_MS = 2500;
 
 // ---------------------------------------------------------------------
 // Tipe minimal payload WhatsApp Cloud API
@@ -111,6 +117,7 @@ export async function POST(req: NextRequest) {
   }
 
   let processed = 0;
+  const botQueue: Array<{ leadId: string; messageId: string }> = [];
   try {
     for (const entry of body.entry ?? []) {
       for (const change of entry.changes ?? []) {
@@ -121,14 +128,34 @@ export async function POST(req: NextRequest) {
         for (const message of value.messages) {
           const contact =
             value.contacts?.find((c) => c.wa_id === message.from) ?? value.contacts?.[0];
-          await handleInboundMessage(message, contact);
+          const saved = await handleInboundMessage(message, contact);
           processed += 1;
+          // Duplikat (webhook retry) tidak memicu bot lagi.
+          if (saved.inserted && saved.messageId) {
+            botQueue.push({ leadId: saved.leadId, messageId: saved.messageId });
+          }
         }
       }
     }
   } catch (err) {
     // Tetap balas 200 agar Meta tidak membanjiri retry; error dicatat di log Vercel.
     console.error("[webhook] Gagal memproses pesan:", errorMessage(err));
+  }
+
+  if (botQueue.length > 0) {
+    // Respons 200 dikirim lebih dulu; chatbot jalan di background (Vercel waitUntil).
+    after(async () => {
+      await Promise.all(
+        botQueue.map(async ({ leadId, messageId }) => {
+          try {
+            const result = await runBotForInbound(leadId, messageId, { debounceMs: BOT_DEBOUNCE_MS });
+            if (result.engine_error) console.warn("[webhook] Gemini fallback:", result.engine_error);
+          } catch (err) {
+            console.error("[webhook] Chatbot gagal:", errorMessage(err));
+          }
+        }),
+      );
+    });
   }
 
   return NextResponse.json({ ok: true, processed }, { status: 200 });
@@ -188,16 +215,20 @@ function messageTimestampIso(m: WaMessage): string {
   return new Date().toISOString();
 }
 
-async function handleInboundMessage(message: WaMessage, contact?: WaContact) {
+async function handleInboundMessage(
+  message: WaMessage,
+  contact?: WaContact,
+): Promise<{ leadId: string; messageId: string | null; inserted: boolean }> {
   const supabase = getSupabaseAdmin();
 
   const phone = normalizePhone(message.from);
-  const customerName = contact?.profile?.name ?? null;
+  const profileName = contact?.profile?.name?.trim() || null;
   const content = extractContent(message);
   const messageAt = messageTimestampIso(message);
   const referral = message.referral;
   const ctwaClid = referral?.ctwa_clid?.trim();
 
+  // customer_name TIDAK diisi dari profil WA: nama dikumpulkan & dikonfirmasi oleh chatbot.
   let leadId: string;
 
   if (ctwaClid) {
@@ -207,7 +238,7 @@ async function handleInboundMessage(message: WaMessage, contact?: WaContact) {
       .upsert(
         {
           phone_number: phone,
-          ...(customerName ? { customer_name: customerName } : {}),
+          ...(profileName ? { wa_profile_name: profileName } : {}),
           source: "meta_ads",
           ctwa_clid: ctwaClid,
           ad_id: referral?.source_id ?? null,
@@ -226,7 +257,7 @@ async function handleInboundMessage(message: WaMessage, contact?: WaContact) {
     const { error: insertError } = await supabase.from("leads").upsert(
       {
         phone_number: phone,
-        customer_name: customerName,
+        wa_profile_name: profileName,
         source: "organic",
         last_customer_message_at: messageAt,
       },
@@ -237,7 +268,7 @@ async function handleInboundMessage(message: WaMessage, contact?: WaContact) {
     const { data, error } = await supabase
       .from("leads")
       .update({
-        ...(customerName ? { customer_name: customerName } : {}),
+        ...(profileName ? { wa_profile_name: profileName } : {}),
         last_customer_message_at: messageAt,
       })
       .eq("phone_number", phone)
@@ -248,15 +279,22 @@ async function handleInboundMessage(message: WaMessage, contact?: WaContact) {
   }
 
   // Simpan pesan; abaikan duplikat (webhook retry) berdasarkan wa_message_id.
-  const { error: msgError } = await supabase.from("messages").upsert(
-    {
-      lead_id: leadId,
-      wa_message_id: message.id,
-      direction: "inbound",
-      content,
-      created_at: messageAt,
-    },
-    { onConflict: "wa_message_id", ignoreDuplicates: true },
-  );
+  const { data: inserted, error: msgError } = await supabase
+    .from("messages")
+    .upsert(
+      {
+        lead_id: leadId,
+        wa_message_id: message.id,
+        direction: "inbound",
+        sender_type: "customer",
+        content,
+        created_at: messageAt,
+      },
+      { onConflict: "wa_message_id", ignoreDuplicates: true },
+    )
+    .select("id");
   if (msgError) throw msgError;
+
+  const messageId = (inserted?.[0]?.id as string | undefined) ?? null;
+  return { leadId, messageId, inserted: Boolean(messageId) };
 }
