@@ -1,7 +1,8 @@
 export type LeadSource = "meta_ads" | "organic";
 export type LeadStatus = "cold" | "warm";
 export type MessageDirection = "inbound" | "outbound";
-export type SenderType = "customer" | "bot" | "cs";
+/** system = catatan internal di roomchat (tidak dikirim ke WhatsApp). */
+export type SenderType = "customer" | "bot" | "cs" | "system";
 
 export const LEAD_STATUSES: LeadStatus[] = ["cold", "warm"];
 

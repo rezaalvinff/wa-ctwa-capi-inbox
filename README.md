@@ -44,6 +44,7 @@ lib/
   capi.ts                           # Filter eligible + kirim CAPI per lead + logging
   leads.ts                          # computeStatus (cold/warm), missing fields, auto-close 24 jam
   routing.ts                        # Pencocokan domisili -> wilayah agent + auto-assign
+  notes.ts                          # Catatan sistem di roomchat (oper ke agent / Antrian Admin)
   knowledge.ts                      # Ekstraksi teks file, memuat materi aktif, pencarian untuk bot rule-based
   auth/access.ts                    # Aturan akses lead (Admin semua, Agent hanya miliknya)
   mitsubishi.ts                     # Katalog unit, deteksi kota, normalisasi
@@ -57,6 +58,7 @@ supabase/
   migration_v2_dipo.sql             # Upgrade database v1 -> v2 tanpa menghapus data
   migration_v3_auth.sql             # Tabel app_users (login) + pengirim pesan CS
   migration_v4_routing_kb.sql       # Wilayah agent, penugasan lead, auto-close 24 jam, knowledge base
+  migration_v5_system_notes.sql     # sender_type 'system' untuk catatan oper di roomchat
 vercel.json                         # Cron harian /api/cron/capi-sync
 ```
 
@@ -65,9 +67,10 @@ vercel.json                         # Cron harian /api/cron/capi-sync
 | Kondisi | Jalankan di Supabase SQL Editor |
 | --- | --- |
 | Project baru | `supabase/schema.sql` |
-| Sudah memakai v1 | `migration_v2_dipo.sql` → `migration_v3_auth.sql` → `migration_v4_routing_kb.sql` |
-| Sudah memakai v2 | `migration_v3_auth.sql` → `migration_v4_routing_kb.sql` |
-| Sudah memakai v3 (login sudah jalan) | `supabase/migration_v4_routing_kb.sql` |
+| Sudah memakai v1 | `migration_v2_dipo.sql` → `migration_v3_auth.sql` → `migration_v4_routing_kb.sql` → `migration_v5_system_notes.sql` |
+| Sudah memakai v2 | `migration_v3_auth.sql` → `migration_v4_routing_kb.sql` → `migration_v5_system_notes.sql` |
+| Sudah memakai v3 (login sudah jalan) | `migration_v4_routing_kb.sql` → `migration_v5_system_notes.sql` |
+| Sudah memakai v4 | `supabase/migration_v5_system_notes.sql` |
 
 Kedua file aman dijalankan ulang. Migrasi v2 melakukan hal berikut:
 
@@ -120,6 +123,14 @@ Setiap Agent punya daftar **wilayah** yang diatur Admin di tab **Pengguna** (mis
 4. Admin bisa mengoper ulang secara manual dari panel **Penanganan** di roomchat. Kalau domisili dikoreksi dan lead belum punya agent, routing dicoba lagi.
 
 Agent hanya melihat dan bisa membalas lead yang dioper ke dirinya (dicek di server: HTTP 403 untuk lead lain).
+
+**Notifikasi oper:**
+
+- Setiap perpindahan penanganan dicatat sebagai **catatan sistem** di timeline roomchat. Catatan ini tidak dikirim ke WhatsApp pelanggan dan tidak dihitung sebagai aktivitas untuk auto-close. Contohnya:
+  - *📌 Lead dioper otomatis ke Agent Surabaya — domisili "Sidoarjo" cocok dengan wilayah "Sidoarjo".*
+  - *📌 Tidak ada wilayah agent yang cocok dengan domisili "Makassar" — lead masuk Antrian Admin.*
+  - *📌 Reza mengoper lead ke Agent Jakarta.* / *📌 Reza mengembalikan lead ke Antrian Admin.*
+- Agent yang sedang membuka dashboard mendapat **pop-up "Lead baru untuk Anda"**, paling lambat 4 detik setelah lead dioper. Klik pop-up untuk langsung membuka roomchat.
 
 ## Auto-close Room Chat (24 jam)
 
@@ -178,7 +189,7 @@ npm run dev
 1. Login sebagai **Admin**. Di tab **Inbox & Chatbot**, klik **Simulasi Chat CTWA**. Lead dummy dibuat dan bot langsung menyapa serta menanyakan nama.
 2. Klik **Simulasi Balasan Customer** berulang kali (jawaban otomatis sesuai data yang masih kurang), atau ketik sendiri di kolom *"ketik sebagai pelanggan"*.
 3. Setelah nama, domisili, dan unit terkumpul, tag otomatis berubah menjadi **🔥 WARM**. Bot mengirim konfirmasi handoff dan beralih ke **Mode Manual CS**.
-4. Buka tab **Meta CAPI Sync**. Lead tersebut muncul sebagai *Pending Sync*. Isi `META_TEST_EVENT_CODE` lalu klik **Auto-Send** dan cek tab *Test events* di Events Manager.
+4. Begitu WARM, event `Lead` langsung dikirim ke Meta CAPI (tanpa tombol), lalu lead dioper ke agent sesuai wilayah dengan catatan di roomchat. Isi `META_TEST_EVENT_CODE` agar event muncul di tab *Test events* Events Manager. Tanpa kredensial Meta, lead tampil *Pending Sync* di tab **Meta CAPI Sync**.
 
 Lead simulasi (`is_simulated = true`) **tidak pernah** dikirimi pesan WhatsApp sungguhan, juga saat `MOCK_MODE=false`, karena nomor acaknya bisa milik orang lain. Simulasi balasan pelanggan hanya diizinkan untuk lead simulasi atau saat `MOCK_MODE=true`.
 
@@ -199,7 +210,11 @@ Edit manual di panel kanan juga menghitung ulang status. Jika lead menjadi warm 
 
 ## Meta CAPI Sync
 
-`POST /api/capi/sync-warm` (tombol di Tab 2) dan `GET /api/cron/capi-sync` (cron) memakai logika yang sama (`lib/capi.ts`). Sebuah lead dikirim **hanya jika** memenuhi semua syarat berikut:
+**Otomatis real-time:** begitu lead menjadi WARM, event `Lead` langsung dikirim ke Meta. Ini berlaku baik lead menjadi WARM lewat chatbot maupun lewat edit manual di panel kanan, tanpa menekan tombol apa pun (`sendLeadEventRealtime` di `lib/capi.ts`). Hasilnya tersimpan di `last_capi_response`.
+
+Lead yang belum berhasil terkirim tetap berstatus **Pending**. Penyebabnya bisa kredensial Meta belum diisi atau Meta mengembalikan error. Lead Pending dikirim ulang otomatis oleh cron harian (`GET /api/cron/capi-sync`). Tombol **"Kirim Ulang yang Pending sekarang"** di Tab 2 hanya opsional, untuk mengirim ulang tanpa menunggu cron.
+
+Semua jalur memakai syarat yang sama. Sebuah lead dikirim **hanya jika** memenuhi semua syarat berikut:
 
 1. `status = 'warm'`
 2. `source = 'meta_ads'`

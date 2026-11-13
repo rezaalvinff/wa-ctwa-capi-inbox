@@ -9,7 +9,9 @@ import { computeStatus, isFilled } from "@/lib/leads";
 import { normalizeDomicile, normalizeName, normalizeUnit } from "@/lib/mitsubishi";
 import { sendWhatsAppText } from "@/lib/whatsapp";
 import { loadActiveKnowledge } from "@/lib/knowledge";
-import { autoAssignLead, type AgentCandidate } from "@/lib/routing";
+import { autoAssignLead, type AgentCandidate, type AutoAssignResult } from "@/lib/routing";
+import { addSystemNote, noteAutoAssigned, noteNoAgentMatch } from "@/lib/notes";
+import { sendLeadEventRealtime, type RealtimeCapiResult } from "@/lib/capi";
 import type { Lead, Message } from "@/lib/types";
 
 export interface BotRunResult {
@@ -21,6 +23,8 @@ export interface BotRunResult {
   became_warm?: boolean;
   /** Agent yang menerima lead saat menjadi WARM (null = Antrian Admin). */
   assigned_agent?: Pick<AgentCandidate, "id" | "full_name"> | null;
+  /** Hasil kirim event Lead ke Meta CAPI secara real-time saat lead menjadi WARM. */
+  capi?: RealtimeCapiResult;
   lead?: Lead;
   reply?: Message;
 }
@@ -71,6 +75,7 @@ export async function runBotForInbound(
   const { data: historyRows, error: historyError } = await supabase
     .from("messages")
     .select("sender_type, content, created_at")
+    .neq("sender_type", "system")
     .eq("lead_id", leadId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
@@ -125,12 +130,12 @@ export async function runBotForInbound(
   }
 
   // Lead WARM -> oper otomatis ke agent yang wilayahnya cocok dengan domisili.
-  let assignedAgent: AgentCandidate | null = null;
+  let assignment: AutoAssignResult | null = null;
   if (becameWarm) {
     try {
-      assignedAgent = await autoAssignLead(updatedLead);
-      if (assignedAgent) {
-        updatedLead = { ...updatedLead, assigned_agent_id: assignedAgent.id, assigned_at: new Date().toISOString() };
+      assignment = await autoAssignLead(updatedLead);
+      if (assignment) {
+        updatedLead = { ...updatedLead, assigned_agent_id: assignment.agent.id, assigned_at: new Date().toISOString() };
       }
     } catch (err) {
       console.error("[bot-engine] auto-assign gagal:", err instanceof Error ? err.message : String(err));
@@ -164,6 +169,17 @@ export async function runBotForInbound(
     .single();
   if (replyError) throw replyError;
 
+  // Setelah handoff: catatan oper di roomchat + kirim event Lead ke Meta CAPI (real-time).
+  let capi: RealtimeCapiResult | undefined;
+  if (becameWarm) {
+    const domicile = updatedLead.domicile ?? "";
+    await addSystemNote(
+      leadId,
+      assignment ? noteAutoAssigned(assignment.agent.full_name, domicile, assignment.region) : noteNoAgentMatch(domicile),
+    );
+    capi = await sendLeadEventRealtime(leadId);
+  }
+
   return {
     ran: true,
     engine: result.engine,
@@ -174,7 +190,8 @@ export async function runBotForInbound(
       interested_unit: patch.interested_unit ?? null,
     },
     became_warm: becameWarm,
-    assigned_agent: becameWarm ? (assignedAgent ? { id: assignedAgent.id, full_name: assignedAgent.full_name } : null) : undefined,
+    assigned_agent: becameWarm ? (assignment ? { id: assignment.agent.id, full_name: assignment.agent.full_name } : null) : undefined,
+    capi,
     lead: updatedLead,
     reply: reply as Message,
   };

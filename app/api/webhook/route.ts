@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { normalizePhone } from "@/lib/phone";
 import { errorMessage } from "@/lib/http";
 import { runBotForInbound } from "@/lib/bot-engine";
+import { sendLeadEventRealtime } from "@/lib/capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
   }
 
   let processed = 0;
-  const botQueue: Array<{ leadId: string; messageId: string }> = [];
+  const botQueue: Array<{ leadId: string; messageId: string; fromAd: boolean }> = [];
   try {
     for (const entry of body.entry ?? []) {
       for (const change of entry.changes ?? []) {
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
           processed += 1;
           // Duplikat (webhook retry) tidak memicu bot lagi.
           if (saved.inserted && saved.messageId) {
-            botQueue.push({ leadId: saved.leadId, messageId: saved.messageId });
+            botQueue.push({ leadId: saved.leadId, messageId: saved.messageId, fromAd: Boolean(message.referral?.ctwa_clid) });
           }
         }
       }
@@ -146,13 +147,15 @@ export async function POST(req: NextRequest) {
     // Respons 200 dikirim lebih dulu; chatbot jalan di background (Vercel waitUntil).
     after(async () => {
       await Promise.all(
-        botQueue.map(async ({ leadId, messageId }) => {
+        botQueue.map(async ({ leadId, messageId, fromAd }) => {
           try {
             const result = await runBotForInbound(leadId, messageId, { debounceMs: BOT_DEBOUNCE_MS });
             if (result.engine_error) console.warn("[webhook] Gemini fallback:", result.engine_error);
           } catch (err) {
             console.error("[webhook] Chatbot gagal:", errorMessage(err));
           }
+          // Lead yang sudah WARM lalu datang lagi dari klik iklan CTWA -> kirim event Lead bila belum.
+          if (fromAd) await sendLeadEventRealtime(leadId);
         }),
       );
     });

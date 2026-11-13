@@ -5,6 +5,8 @@ import { computeStatus } from "@/lib/leads";
 import { getRequestUser } from "@/lib/auth/users";
 import { ASSIGNED_AGENT_EMBED, canAccessLead } from "@/lib/auth/access";
 import { autoAssignLead } from "@/lib/routing";
+import { addSystemNote, noteAutoAssigned, noteManualAssigned, noteNoAgentMatch, noteReturnedToAdmin } from "@/lib/notes";
+import { sendLeadEventRealtime, type RealtimeCapiResult } from "@/lib/capi";
 import type { Lead } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -72,16 +74,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const lead = current as Lead;
     if (!canAccessLead(me, lead)) return jsonError("Lead ini tidak dioper ke Anda.", 403);
 
+    let manualAgentName: string | null = null;
     if (manualAssign && body.assigned_agent_id) {
       const { data: agent, error: agentError } = await supabase
         .from("app_users")
-        .select("id, role, is_active")
+        .select("id, role, is_active, full_name")
         .eq("id", body.assigned_agent_id)
         .maybeSingle();
       if (agentError) throw agentError;
       if (!agent || agent.role !== "agent" || !agent.is_active) return jsonError("Agent tidak ditemukan atau nonaktif.");
       patch.assigned_agent_id = agent.id;
       patch.assigned_at = new Date().toISOString();
+      manualAgentName = agent.full_name as string;
     } else if (manualAssign) {
       patch.assigned_agent_id = null;
       patch.assigned_at = null;
@@ -108,9 +112,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let autoAssigned: { id: string; full_name: string } | null = null;
     const domicileChanged = "domicile" in body && patch.domicile !== lead.domicile;
     if (!manualAssign && (becameWarm || domicileChanged)) {
-      const agent = await autoAssignLead(updated as Lead);
-      if (agent) autoAssigned = { id: agent.id, full_name: agent.full_name };
+      const result = await autoAssignLead(updated as Lead);
+      if (result) {
+        autoAssigned = { id: result.agent.id, full_name: result.agent.full_name };
+        await addSystemNote(id, noteAutoAssigned(result.agent.full_name, (updated as Lead).domicile ?? "", result.region));
+      } else if (becameWarm && !(updated as Lead).assigned_agent_id) {
+        await addSystemNote(id, noteNoAgentMatch((updated as Lead).domicile ?? ""));
+      }
     }
+
+    // Catatan oper manual oleh Admin.
+    if (manualAssign && (patch.assigned_agent_id ?? null) !== (lead.assigned_agent_id ?? null)) {
+      await addSystemNote(id, manualAgentName ? noteManualAssigned(me.full_name, manualAgentName) : noteReturnedToAdmin(me.full_name));
+    }
+
+    // Lead baru WARM -> kirim event Lead ke Meta CAPI secara real-time.
+    let capi: RealtimeCapiResult | undefined;
+    if (becameWarm) capi = await sendLeadEventRealtime(id);
 
     const { data: fresh, error: freshError } = await supabase
       .from("leads")
@@ -119,7 +137,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .single();
     if (freshError) throw freshError;
 
-    return NextResponse.json({ ok: true, lead: fresh, became_warm: becameWarm, auto_assigned: autoAssigned });
+    return NextResponse.json({ ok: true, lead: fresh, became_warm: becameWarm, auto_assigned: autoAssigned, capi });
   } catch (err) {
     console.error("[leads/:id PATCH]", errorMessage(err));
     return jsonError(errorMessage(err), 500);

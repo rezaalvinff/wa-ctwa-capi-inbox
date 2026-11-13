@@ -11,7 +11,8 @@ import {
   Loader2,
   MessageCircle,
   RefreshCw,
-  Rocket,
+  RotateCw,
+  Zap,
   X,
   XCircle,
 } from "lucide-react";
@@ -157,9 +158,9 @@ export default function CapiSyncTab({
             tone="bg-orange-50"
           />
           <StatCard
-            label="Siap Kirim CAPI (Pending Sync)"
+            label="Pending Sync (menunggu kirim ulang)"
             value={stats.pending}
-            hint="belum ada event 'Lead' di capi_sent_events"
+            hint="real-time belum berhasil (mis. CAPI belum dikonfigurasi / error); dicoba ulang otomatis"
             icon={<Clock className="h-5 w-5 text-amber-600" />}
             tone="bg-amber-50"
           />
@@ -173,12 +174,16 @@ export default function CapiSyncTab({
         </div>
 
         {/* Banner aksi */}
-        <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-white p-4 shadow-sm sm:p-5">
+        <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-2 text-sm text-slate-700">
-              <p className="flex items-center gap-2 font-medium text-slate-900">
-                <CalendarClock className="h-4 w-4 text-red-600" />
-                Auto-sync harian: {config?.cron_label ?? "Setiap hari (Vercel Cron)"}
+              <p className="flex items-center gap-2 font-semibold text-emerald-800">
+                <Zap className="h-4 w-4" />
+                Auto-send real-time AKTIF — event Lead dikirim otomatis ke Meta begitu lead CTWA menjadi WARM
+              </p>
+              <p className="flex items-center gap-2 text-xs text-slate-600">
+                <CalendarClock className="h-3.5 w-3.5 text-slate-500" />
+                Cadangan otomatis: {config?.cron_label ?? "setiap hari (Vercel Cron)"} mengirim ulang yang masih Pending / gagal.
               </p>
               <p className="text-xs text-slate-500">
                 Event <code className="rounded bg-white px-1 ring-1 ring-slate-200">Lead</code> dengan action_source{" "}
@@ -203,11 +208,12 @@ export default function CapiSyncTab({
               type="button"
               onClick={runSync}
               disabled={syncing || stats.pending === 0}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-3.5 text-sm font-semibold text-white shadow-md transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 lg:max-w-md"
+              title="Tidak wajib: pengiriman sudah otomatis. Gunakan bila ada yang gagal dan ingin dikirim ulang sekarang."
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 lg:max-w-xs"
             >
-              {syncing ? <Loader2 className="h-5 w-5 shrink-0 animate-spin" /> : <Rocket className="h-5 w-5 shrink-0" />}
+              {syncing ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCw className="h-4 w-4 shrink-0" />}
               <span>
-                Auto-Send Semua Prospek Warm CTWA ({windowDays} Hari Terakhir) ke Meta CAPI
+                Kirim Ulang yang Pending sekarang
                 {stats.pending > 0 && ` · ${stats.pending}`}
               </span>
             </button>

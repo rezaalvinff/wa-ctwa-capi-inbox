@@ -254,3 +254,48 @@ export async function syncWarmLeads(trigger: "manual" | "cron"): Promise<CapiSyn
     };
   }
 }
+
+// ---------------------------------------------------------------------
+// Real-time: kirim begitu lead menjadi WARM
+// ---------------------------------------------------------------------
+export interface RealtimeCapiResult {
+  status: "sent" | "failed" | "skipped";
+  reason?: string;
+  http_status?: number | null;
+}
+
+/**
+ * Kirim event 'Lead' untuk 1 lead segera setelah menjadi WARM, bila memenuhi
+ * syarat (meta_ads + ctwa_clid + 7 hari + belum pernah terkirim). Gagal / belum
+ * dikonfigurasi -> tetap Pending dan akan dicoba ulang oleh cron harian.
+ * Tidak melempar error.
+ */
+export async function sendLeadEventRealtime(leadId: string): Promise<RealtimeCapiResult> {
+  try {
+    const { data, error } = await getSupabaseAdmin().from("leads").select("*").eq("id", leadId).maybeSingle();
+    if (error) throw error;
+    if (!data) return { status: "skipped", reason: "Lead tidak ditemukan." };
+    const lead = data as Lead;
+
+    if (sentEvents(lead).includes(EVENT_NAME)) return { status: "skipped", reason: "Event Lead sudah pernah terkirim." };
+    if (lead.status !== "warm") return { status: "skipped", reason: "Lead belum WARM." };
+    if (lead.source !== "meta_ads" || !lead.ctwa_clid?.trim()) {
+      return { status: "skipped", reason: "Bukan lead Click-to-WhatsApp Meta Ads (organik) - tidak dikirim ke CAPI." };
+    }
+    if (!isWarmCtwaInWindow(lead)) return { status: "skipped", reason: `Di luar jendela ${CAPI_WINDOW_DAYS} hari.` };
+    if (!hasCapiConfig()) {
+      return {
+        status: "skipped",
+        reason: "META_DATASET_ID / META_ACCESS_TOKEN belum diisi - tetap Pending, otomatis dikirim ulang oleh cron harian setelah dikonfigurasi.",
+      };
+    }
+
+    const log = await sendLeadEvent(lead);
+    return log.success
+      ? { status: "sent", http_status: log.http_status }
+      : { status: "failed", reason: `${log.error ?? "Error dari Meta"} - akan dicoba ulang oleh cron harian.`, http_status: log.http_status };
+  } catch (err) {
+    console.error("[capi realtime]", errorMessage(err));
+    return { status: "failed", reason: errorMessage(err) };
+  }
+}

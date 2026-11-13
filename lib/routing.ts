@@ -38,7 +38,21 @@ export function regionMatchScore(domicile: string, region: string): number {
   return ` ${d} `.includes(` ${r} `) ? r.length : 0;
 }
 
-/** Agent dengan wilayah paling spesifik yang cocok (null bila tidak ada). */
+/** Wilayah agent yang paling cocok dengan domisili (null bila tidak ada). */
+export function bestMatchingRegion(domicile: string, regions: string[]): string | null {
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const r of regions ?? []) {
+    const score = regionMatchScore(domicile, r);
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
+    }
+  }
+  return best;
+}
+
+/** Agent dengan wilayah paling spesifik yang cocok (kosong bila tidak ada). */
 export function pickAgentsForDomicile(domicile: string, agents: AgentCandidate[]): AgentCandidate[] {
   let best = 0;
   let winners: AgentCandidate[] = [];
@@ -55,12 +69,18 @@ export function pickAgentsForDomicile(domicile: string, agents: AgentCandidate[]
   return winners;
 }
 
+export interface AutoAssignResult {
+  agent: AgentCandidate;
+  /** Wilayah agent yang cocok dengan domisili. */
+  region: string;
+}
+
 /**
  * Tugaskan lead WARM yang belum punya agent ke agent yang wilayahnya cocok.
  * Bila beberapa agent sama cocoknya, dipilih yang paling sedikit memegang lead
- * dalam 7 hari terakhir. Mengembalikan agent yang ditugaskan, atau null.
+ * dalam 7 hari terakhir. Mengembalikan agent + wilayah yang cocok, atau null.
  */
-export async function autoAssignLead(lead: Pick<Lead, "id" | "status" | "domicile" | "assigned_agent_id">): Promise<AgentCandidate | null> {
+export async function autoAssignLead(lead: Pick<Lead, "id" | "status" | "domicile" | "assigned_agent_id">): Promise<AutoAssignResult | null> {
   if (lead.status !== "warm" || lead.assigned_agent_id || !lead.domicile?.trim()) return null;
   const supabase = getSupabaseAdmin();
 
@@ -99,5 +119,6 @@ export async function autoAssignLead(lead: Pick<Lead, "id" | "status" | "domicil
     .is("assigned_agent_id", null)
     .select("id");
   if (updateError) throw updateError;
-  return updated && updated.length > 0 ? chosen : null;
+  if (!updated || updated.length === 0) return null;
+  return { agent: chosen, region: bestMatchingRegion(lead.domicile, chosen.regions) ?? lead.domicile };
 }
