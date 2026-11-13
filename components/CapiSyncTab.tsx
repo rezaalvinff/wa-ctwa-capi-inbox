@@ -105,6 +105,10 @@ export default function CapiSyncTab({
     setSummary(null);
     try {
       const res = await fetch("/api/capi/sync-warm", { method: "POST", cache: "no-store" });
+      if (res.status === 401) {
+        window.location.replace("/login");
+        return;
+      }
       const json = (await res.json().catch(() => ({}))) as CapiSyncSummary;
       setSummary(json);
     } catch (err) {

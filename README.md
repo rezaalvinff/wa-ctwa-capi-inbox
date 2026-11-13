@@ -13,8 +13,10 @@ Stack: Next.js 15 (App Router), TypeScript, Tailwind CSS v4, Supabase (PostgreSQ
 ## Struktur
 
 ```
+middleware.ts                       # Wajib login + pembatasan role (Admin / Agent)
 app/
-  page.tsx                          # Header + navigasi 2 tab
+  page.tsx                          # Header, menu user, navigasi tab sesuai role
+  login/page.tsx                    # Halaman login
   api/
     webhook/route.ts                # WhatsApp Cloud API: verifikasi + pesan masuk -> chatbot (after())
     messages/send/route.ts          # Balasan manual CS (sender_type 'cs')
@@ -27,9 +29,12 @@ app/
     capi/warm-leads/route.ts        # GET prospek warm CTWA 7 hari + statistik (Tab 2)
     cron/capi-sync/route.ts         # GET dipanggil Vercel Cron (proteksi CRON_SECRET)
     config/route.ts                 # GET flag non-rahasia untuk UI (mock mode, engine AI)
+    auth/login|logout|me            # Login (scrypt + cookie sesi), logout, user aktif
+    users/route.ts, users/[id]      # Kelola user (Admin): list, tambah, ubah role/status, reset password
 components/
   InboxTab.tsx                      # Tab 1: daftar prospek, roomchat, panel kualifikasi
   CapiSyncTab.tsx                   # Tab 2: statistik, tombol auto-send, tabel monitoring
+  UsersTab.tsx                      # Tab Pengguna (Admin)
   ui.tsx                            # Badge, tag WARM/COLD, copy button, formatter
 lib/
   chatbot.ts                        # Gemini structured output + fallback rule-based + simulator
@@ -38,10 +43,14 @@ lib/
   leads.ts                          # computeStatus (cold/warm), missing fields
   mitsubishi.ts                     # Katalog unit, deteksi kota, normalisasi
   whatsapp.ts                       # Kirim teks via WhatsApp Cloud API
+  auth/session.ts                   # Token sesi HMAC (Web Crypto, aman di Edge middleware)
+  auth/password.ts                  # Hash & verifikasi password (scrypt)
+  auth/users.ts                     # Header identitas dari middleware, validasi email
   supabase.ts, phone.ts, config.ts, http.ts, types.ts
 supabase/
   schema.sql                        # Instalasi BARU (v2)
   migration_v2_dipo.sql             # Upgrade database v1 -> v2 tanpa menghapus data
+  migration_v3_auth.sql             # Tabel app_users (login) + pengirim pesan CS
 vercel.json                         # Cron harian /api/cron/capi-sync
 ```
 
@@ -50,7 +59,8 @@ vercel.json                         # Cron harian /api/cron/capi-sync
 | Kondisi | Jalankan di Supabase SQL Editor |
 | --- | --- |
 | Project baru | `supabase/schema.sql` |
-| Sudah memakai v1 | `supabase/migration_v2_dipo.sql` |
+| Sudah memakai v1 | `supabase/migration_v2_dipo.sql`, lalu `supabase/migration_v3_auth.sql` |
+| Sudah memakai v2 | `supabase/migration_v3_auth.sql` |
 
 Kedua file aman dijalankan ulang. Migrasi v2 melakukan hal berikut:
 
@@ -59,6 +69,34 @@ Kedua file aman dijalankan ulang. Migrasi v2 melakukan hal berikut:
 - Menyalin `customer_name` lama ke `wa_profile_name`, karena di v1 kolom itu berisi nama profil WhatsApp.
 - Menandai semua pesan keluar v1 sebagai `sender_type = 'cs'`.
 - Memasang trigger `leads_auto_tag` yang menghitung ulang `status` dan `warm_at` di setiap insert/update. Status tetap konsisten walau data diedit langsung di database.
+
+## Login & Role
+
+Semua halaman dan API wajib login, kecuali `/login`, `/api/webhook` (Meta) dan `/api/cron/capi-sync` (dilindungi `CRON_SECRET`).
+
+| Fitur | Admin | Agent |
+| --- | :---: | :---: |
+| Tab Inbox & Chatbot: baca chat, balas manual, ambil alih / aktifkan bot, edit nama/domisili/unit | ✅ | ✅ |
+| Tombol simulasi (chat CTWA/organik, balasan customer) | ✅ | – |
+| Tab Meta CAPI Sync + endpoint `/api/capi/*` | ✅ | – |
+| Tab Pengguna: tambah user, ubah role, reset password, nonaktifkan | ✅ | – |
+
+**Admin pertama:**
+
+1. Jalankan migrasi.
+2. Isi `AUTH_SECRET`, `ADMIN_EMAIL`, dan `ADMIN_PASSWORD` (minimal 8 karakter), lalu deploy.
+3. Login dengan email & password tersebut. Akun Admin otomatis dibuat di tabel `app_users`.
+4. Buat akun Agent dari tab **Pengguna**. Setelah tabel berisi user, `ADMIN_EMAIL`/`ADMIN_PASSWORD` tidak dipakai lagi. Variabel itu boleh dihapus dari env.
+
+**Keamanan:**
+
+- Password di-hash dengan scrypt (modul `crypto` bawaan Node), tidak pernah disimpan plain text.
+- Sesi berupa cookie `httpOnly` + `SameSite=Lax` yang ditandatangani HMAC dan berlaku 12 jam.
+- `middleware.ts` memeriksa role, status aktif, dan `session_version` user ke database di **setiap request**. Akibatnya, menonaktifkan user, mengubah role, atau reset password langsung membuat sesi lamanya tidak berlaku.
+- Akses Agent ke fitur Admin ditolak di server (HTTP 403), bukan hanya disembunyikan di UI.
+- Setelah 5 kali salah password, akun dikunci 15 menit. Reset password oleh Admin langsung membuka kunci.
+- Admin tidak bisa menonaktifkan atau menurunkan role akunnya sendiri, dan sistem selalu menyisakan minimal 1 Admin aktif.
+- Balasan manual mencatat CS pengirimnya (`messages.sent_by`, `sent_by_name`). Nama tersebut tampil di bubble chat sebagai *👤 CS · Nama*.
 
 ## Environment Variables
 
@@ -78,6 +116,8 @@ cp .env.example .env.local
 | `CRON_SECRET` | disarankan | Proteksi `/api/cron/capi-sync` (Vercel mengirim `Authorization: Bearer <CRON_SECRET>` otomatis) |
 | `WA_BUSINESS_ACCOUNT_ID` | opsional | Dikirim sebagai `user_data.whatsapp_business_account_id` |
 | `META_APP_SECRET` | disarankan | Verifikasi signature `X-Hub-Signature-256` webhook |
+| `AUTH_SECRET` | ✅ | Secret penandatangan cookie login, **minimal 32 karakter** (`openssl rand -base64 48`) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | ✅ (sekali) | Akun Admin pertama, dibuat otomatis saat login pertama selama tabel `app_users` masih kosong |
 | `MOCK_MODE` | – | `true` = tidak ada pesan yang dikirim ke WhatsApp (bot & CS hanya disimpan ke DB) |
 
 ## Menjalankan
@@ -92,7 +132,7 @@ npm run dev
 
 ### Testing tanpa WhatsApp (`MOCK_MODE=true`)
 
-1. Tab **Inbox & Chatbot** → klik **Simulasi Chat CTWA**. Lead dummy dibuat dan bot langsung menyapa serta menanyakan nama.
+1. Login sebagai **Admin**. Di tab **Inbox & Chatbot**, klik **Simulasi Chat CTWA**. Lead dummy dibuat dan bot langsung menyapa serta menanyakan nama.
 2. Klik **Simulasi Balasan Customer** berulang kali (jawaban otomatis sesuai data yang masih kurang), atau ketik sendiri di kolom *"ketik sebagai pelanggan"*.
 3. Setelah nama, domisili, dan unit terkumpul, tag otomatis berubah menjadi **🔥 WARM**. Bot mengirim konfirmasi handoff dan beralih ke **Mode Manual CS**.
 4. Buka tab **Meta CAPI Sync**. Lead tersebut muncul sebagai *Pending Sync*. Isi `META_TEST_EVENT_CODE` lalu klik **Auto-Send** dan cek tab *Test events* di Events Manager.
@@ -164,11 +204,11 @@ Cron di `vercel.json` berjalan `0 2 * * *` (UTC) = **09:00 WIB** setiap hari. Ji
 
 ## Deploy ke Vercel
 
-1. Import repo, isi environment variables, lalu deploy.
+1. Import repo, isi environment variables (termasuk `AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`), lalu deploy.
 2. Webhook Meta: `https://<domain>/api/webhook` (subscribe field **messages**).
 3. Isi `CRON_SECRET` agar endpoint cron tidak bisa dipanggil orang lain.
 
-> ⚠️ Aplikasi ini belum memiliki login. Siapa pun yang mengetahui URL bisa melihat data prospek dan memicu sync CAPI. Sebelum dipakai tim, lindungi dengan Vercel Deployment Protection / Password Protection atau tambahkan autentikasi.
+> Pastikan `AUTH_SECRET` dan `CRON_SECRET` terisi di Vercel sebelum aplikasi dipakai tim.
 
 ## Pindah ke VPS
 

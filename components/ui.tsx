@@ -72,6 +72,10 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     cache: "no-store",
   });
+  if (res.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    // Sesi habis / dicabut -> kembali ke halaman login.
+    window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+  }
   const json = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) {
     const err = new Error(json.error ?? `HTTP ${res.status}`) as Error & { payload?: unknown };

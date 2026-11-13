@@ -36,6 +36,8 @@ export interface Message {
   sender_type: SenderType;
   content: string;
   send_error: string | null;
+  sent_by?: string | null;
+  sent_by_name?: string | null;
   created_at: string;
 }
 
@@ -79,4 +81,17 @@ export interface CapiSyncSummary {
 
 export interface WarmCapiLead extends Lead {
   capi_state: "pending" | "sent";
+}
+
+export type UserRole = "admin" | "agent";
+
+export interface AppUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  is_active: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
 }

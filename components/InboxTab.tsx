@@ -95,11 +95,14 @@ const QUAL_ITEMS: Array<{ key: keyof QualForm; label: string; placeholder: strin
 export default function InboxTab({
   active,
   config,
+  isAdmin,
   selectedId,
   onSelect,
 }: {
   active: boolean;
   config: AppConfig | null;
+  /** Agent tidak melihat tombol simulasi & status CAPI. */
+  isAdmin: boolean;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
@@ -231,7 +234,7 @@ export default function InboxTab({
 
   const lead: Lead | null = activeLead ?? leads.find((l) => l.id === selectedId) ?? null;
   const outside24h = lead ? Date.now() - new Date(lead.last_customer_message_at).getTime() >= WINDOW_24H_MS : false;
-  const canSimulateReply = Boolean(lead && (config?.mock_mode || lead.is_simulated));
+  const canSimulateReply = Boolean(isAdmin && lead && (config?.mock_mode || lead.is_simulated));
   const qualDone = lead ? QUAL_ITEMS.filter((i) => Boolean(lead[i.key]?.trim())).length : 0;
 
   // ---------------- Actions ----------------
@@ -370,7 +373,8 @@ export default function InboxTab({
         className={`${selectedId ? "hidden md:flex" : "flex"} w-full min-h-0 flex-col border-r border-slate-200 bg-white md:w-80 md:shrink-0 lg:w-96`}
       >
         <div className="border-b border-slate-200 p-4">
-          <div className="grid grid-cols-2 gap-2">
+          {isAdmin && (
+          <div className="mb-3 grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => simulateNewChat("ctwa")}
@@ -390,8 +394,9 @@ export default function InboxTab({
               Simulasi Chat Organik
             </button>
           </div>
+          )}
 
-          <div className="relative mt-3">
+          <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
@@ -442,7 +447,9 @@ export default function InboxTab({
             <li className="flex flex-col items-center gap-2 p-8 text-center text-sm text-slate-500">
               <Inbox className="h-8 w-8 text-slate-300" />
               {leads.length === 0
-                ? "Belum ada chat. Klik tombol simulasi untuk mengetes chatbot dari awal."
+                ? isAdmin
+                  ? "Belum ada chat. Klik tombol simulasi untuk mengetes chatbot dari awal."
+                  : "Belum ada chat masuk."
                 : "Tidak ada prospek yang cocok dengan filter/pencarian."}
             </li>
           )}
@@ -590,7 +597,10 @@ export default function InboxTab({
                     )}
                     <div className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-sm shadow-sm sm:max-w-[70%] ${BUBBLE_STYLE[sender]}`}>
-                        <p className={`mb-0.5 text-[11px] font-semibold ${LABEL_STYLE[sender]}`}>{SENDER_LABEL[sender]}</p>
+                        <p className={`mb-0.5 text-[11px] font-semibold ${LABEL_STYLE[sender]}`}>
+                          {SENDER_LABEL[sender]}
+                          {sender === "cs" && m.sent_by_name ? ` · ${m.sent_by_name}` : ""}
+                        </p>
                         <p className="whitespace-pre-wrap break-words">{m.content}</p>
                         <p className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-slate-500">
                           {formatTime(m.created_at)}
@@ -914,6 +924,7 @@ export default function InboxTab({
               )}
             </Card>
 
+            {isAdmin && (
             <Card title="Status Meta CAPI" icon={<Megaphone className="h-3.5 w-3.5" />}>
               {lead.source !== "meta_ads" || !lead.ctwa_clid ? (
                 <p className="text-xs text-slate-500">Prospek organik — tidak dikirim ke Meta Conversions API.</p>
@@ -929,6 +940,7 @@ export default function InboxTab({
                 <p className="text-xs text-slate-500">Menunggu status WARM sebelum dapat dikirim sebagai event Lead.</p>
               )}
             </Card>
+            )}
           </aside>
         </>
       )}
