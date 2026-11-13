@@ -3,9 +3,10 @@
 --
 -- Instalasi baru  : jalankan file ini di Supabase Dashboard > SQL Editor.
 -- Upgrade dari v1 : JANGAN jalankan file ini, gunakan migration_v2_dipo.sql
---                   lalu migration_v3_auth.sql, lalu migration_v4_routing_kb.sql.
--- Upgrade dari v2 : jalankan migration_v3_auth.sql lalu migration_v4_routing_kb.sql.
--- Upgrade dari v3 : jalankan migration_v4_routing_kb.sql saja.
+--                   lalu migration_v3_auth.sql, migration_v4_routing_kb.sql, migration_v5_system_notes.sql.
+-- Upgrade dari v2 : jalankan migration_v3_auth.sql, migration_v4_routing_kb.sql, migration_v5_system_notes.sql.
+-- Upgrade dari v3 : jalankan migration_v4_routing_kb.sql lalu migration_v5_system_notes.sql.
+-- Upgrade dari v4 : jalankan migration_v5_system_notes.sql saja.
 -- Aman dijalankan ulang (idempotent).
 -- =====================================================================
 
@@ -229,3 +230,28 @@ create policy "service_role full access knowledge_items"
   to service_role
   using (true)
   with check (true);
+
+-- =====================================================================
+-- v5: catatan sistem di roomchat (sama dengan migration_v5_system_notes.sql)
+-- =====================================================================
+
+-- sender_type 'system' = catatan internal (tidak dikirim ke WhatsApp pelanggan).
+alter table public.messages drop constraint if exists messages_sender_type_check;
+alter table public.messages
+  add constraint messages_sender_type_check check (sender_type in ('customer', 'bot', 'cs', 'system'));
+
+-- Catatan sistem bukan "respon" sehingga tidak memperpanjang auto-close 24 jam.
+create or replace function public.messages_touch_lead_activity()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.sender_type = 'system' then
+    return new;
+  end if;
+  update public.leads
+     set last_activity_at = greatest(last_activity_at, new.created_at)
+   where id = new.lead_id;
+  return new;
+end;
+$$;

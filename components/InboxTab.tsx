@@ -58,18 +58,21 @@ const SENDER_LABEL: Record<SenderType, string> = {
   customer: "Pelanggan",
   bot: "🤖 Bot DIPO",
   cs: "👤 CS",
+  system: "📌 Sistem",
 };
 
 const BUBBLE_STYLE: Record<SenderType, string> = {
   customer: "rounded-tl-none bg-white",
   bot: "rounded-tr-none bg-[#e3eeff]",
   cs: "rounded-tr-none bg-[#d9fdd3]",
+  system: "",
 };
 
 const LABEL_STYLE: Record<SenderType, string> = {
   customer: "text-slate-500",
   bot: "text-blue-700",
   cs: "text-emerald-700",
+  system: "text-indigo-700",
 };
 
 function lastActivity(lead: LeadWithPreview): number {
@@ -84,6 +87,24 @@ function hoursSince(iso: string): number {
 }
 
 type Notice = { type: "success" | "info" | "error"; text: string } | null;
+
+interface CapiRealtime {
+  status: "sent" | "failed" | "skipped";
+  reason?: string;
+}
+
+function capiText(capi?: CapiRealtime): string {
+  if (!capi) return "";
+  if (capi.status === "sent") return " ✅ Event Lead langsung terkirim ke Meta CAPI.";
+  if (capi.status === "failed") return ` ⚠️ Kirim Meta CAPI gagal: ${capi.reason ?? "error"}`;
+  return ` (Meta CAPI: ${capi.reason ?? "dilewati"})`;
+}
+
+interface Toast {
+  id: string;
+  leadId: string;
+  text: string;
+}
 
 interface QualForm {
   customer_name: string;
@@ -126,6 +147,8 @@ export default function InboxTab({
   const [handlerFilter, setHandlerFilter] = useState<string>("all"); // all | admin | <agent id>
   const [agents, setAgents] = useState<AppUser[]>([]);
   const [assigning, setAssigning] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const knownLeadIds = useRef<Set<string> | null>(null);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -155,6 +178,25 @@ export default function InboxTab({
   const loadLeads = useCallback(async () => {
     try {
       const res = await api<{ leads: LeadWithPreview[] }>("/api/leads");
+      // Agent: munculkan notifikasi untuk lead yang baru dioper ke dirinya.
+      if (!isAdmin) {
+        if (knownLeadIds.current) {
+          const fresh = res.leads.filter((l) => !knownLeadIds.current!.has(l.id));
+          if (fresh.length) {
+            setToasts((prev) => [
+              ...prev,
+              ...fresh.map((l) => ({
+                id: `${l.id}-${Date.now()}`,
+                leadId: l.id,
+                text: `Lead baru dioper ke Anda: ${displayName(l)}${l.domicile ? ` (${l.domicile})` : ""}${
+                  l.interested_unit ? ` · ${l.interested_unit}` : ""
+                }`,
+              })),
+            ]);
+          }
+        }
+        knownLeadIds.current = new Set(res.leads.map((l) => l.id));
+      }
       setLeads(res.leads);
       setListError(null);
     } catch (err) {
@@ -162,7 +204,7 @@ export default function InboxTab({
     } finally {
       setLeadsLoaded(true);
     }
-  }, []);
+  }, [isAdmin]);
 
   const loadMessages = useCallback(async (leadId: string) => {
     try {
@@ -213,6 +255,12 @@ export default function InboxTab({
       if (el) el.scrollTop = el.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timer = setTimeout(() => setToasts((prev) => prev.slice(1)), 10000);
+    return () => clearTimeout(timer);
+  }, [toasts]);
 
   // Daftar agent (Admin) untuk filter & oper manual.
   useEffect(() => {
@@ -296,6 +344,7 @@ export default function InboxTab({
           engine_error?: string;
           lead?: Lead;
           assigned_agent?: { id: string; full_name: string } | null;
+          capi?: CapiRealtime;
         };
       }>(
         "/api/simulate/reply",
@@ -306,9 +355,11 @@ export default function InboxTab({
       if (res.bot.became_warm) {
         setNotice({
           type: "success",
-          text: res.bot.assigned_agent
-            ? `🔥 Data lengkap! Lead WARM otomatis dioper ke ${res.bot.assigned_agent.full_name} (wilayah cocok dengan domisili). Bot nonaktif.`
-            : "🔥 Data lengkap! Lead WARM, tetapi tidak ada wilayah agent yang cocok — masuk Antrian Admin. Bot nonaktif.",
+          text:
+            (res.bot.assigned_agent
+              ? `🔥 Data lengkap! Lead WARM otomatis dioper ke ${res.bot.assigned_agent.full_name} (wilayah cocok dengan domisili). Bot nonaktif.`
+              : "🔥 Data lengkap! Lead WARM, tetapi tidak ada wilayah agent yang cocok — masuk Antrian Admin. Bot nonaktif.") +
+            capiText(res.bot.capi),
         });
       } else if (res.bot.engine_error) {
         setNotice({ type: "info", text: `Gemini gagal, bot memakai fallback rule-based: ${res.bot.engine_error}` });
@@ -345,7 +396,12 @@ export default function InboxTab({
     body: Partial<Pick<Lead, "customer_name" | "domicile" | "interested_unit" | "bot_active" | "assigned_agent_id">>,
   ) {
     if (!lead) return null;
-    const res = await api<{ lead: Lead; became_warm: boolean; auto_assigned: { id: string; full_name: string } | null }>(`/api/leads/${lead.id}`, {
+    const res = await api<{
+      lead: Lead;
+      became_warm: boolean;
+      auto_assigned: { id: string; full_name: string } | null;
+      capi?: CapiRealtime;
+    }>(`/api/leads/${lead.id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
@@ -409,7 +465,7 @@ export default function InboxTab({
           type: "success",
           text: `🔥 Ketiga data lengkap — status otomatis WARM, bot dinonaktifkan. ${
             res.auto_assigned ? `Lead dioper ke ${res.auto_assigned.full_name}.` : res.lead.assigned_agent_id ? "" : "Tidak ada wilayah agent yang cocok — tetap di Antrian Admin."
-          }`,
+          }${capiText(res.capi)}`,
         });
       } else {
         setNotice({
@@ -573,6 +629,7 @@ export default function InboxTab({
                         <>
                           {preview.sender_type === "bot" && <span className="text-blue-600">🤖 </span>}
                           {preview.sender_type === "cs" && <span className="text-slate-400">CS: </span>}
+                          {preview.sender_type === "system" && <span className="text-indigo-600">Sistem: </span>}
                           {preview.content}
                         </>
                       ) : (
@@ -707,6 +764,16 @@ export default function InboxTab({
                         </span>
                       </div>
                     )}
+                    {sender === "system" ? (
+                      <div className="my-2 flex justify-center">
+                        <div className="max-w-[90%] rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-center text-xs text-indigo-800 shadow-sm sm:max-w-[75%]">
+                          <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                          <p className="mt-0.5 text-[10px] text-indigo-500">
+                            {formatTime(m.created_at)} · catatan internal, tidak terkirim ke pelanggan
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
                     <div className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-sm shadow-sm sm:max-w-[70%] ${BUBBLE_STYLE[sender]}`}>
                         <p className={`mb-0.5 text-[11px] font-semibold ${LABEL_STYLE[sender]}`}>
@@ -725,6 +792,7 @@ export default function InboxTab({
                         )}
                       </div>
                     </div>
+                    )}
                   </div>
                 );
               })}
@@ -1107,19 +1175,56 @@ export default function InboxTab({
                 <p className="text-xs text-slate-500">Prospek organik — tidak dikirim ke Meta Conversions API.</p>
               ) : (lead.capi_sent_events ?? []).includes("Lead") ? (
                 <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-                  <CheckCircle2 className="h-4 w-4" /> Event Lead terkirim {formatDateTime(lead.capi_synced_at)}
+                  <CheckCircle2 className="h-4 w-4" /> Event Lead terkirim otomatis {formatDateTime(lead.capi_synced_at)}
                 </p>
               ) : lead.status === "warm" ? (
                 <p className="text-xs text-amber-700">
-                  Pending Sync — akan dikirim lewat tab <b>Meta CAPI Sync</b> (manual atau auto-sync harian).
+                  Pending Sync — pengiriman real-time belum berhasil (lihat log di tab <b>Meta CAPI Sync</b>). Dicoba ulang otomatis oleh
+                  cron harian.
                 </p>
               ) : (
-                <p className="text-xs text-slate-500">Menunggu status WARM sebelum dapat dikirim sebagai event Lead.</p>
+                <p className="text-xs text-slate-500">Event Lead dikirim otomatis ke Meta begitu lead menjadi WARM.</p>
               )}
             </Card>
             )}
           </aside>
         </>
+      )}
+      {/* Notifikasi lead baru (Agent) */}
+      {toasts.length > 0 && (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              role="status"
+              className="pointer-events-auto flex items-start gap-3 rounded-xl border border-indigo-200 bg-white p-3 shadow-lg"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
+                <UserCheck className="h-4 w-4" />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect(t.leadId);
+                  setToasts((prev) => prev.filter((x) => x.id !== t.id));
+                }}
+                className="min-w-0 flex-1 text-left"
+              >
+                <p className="text-sm font-semibold text-slate-900">🔔 Lead baru untuk Anda</p>
+                <p className="text-xs text-slate-600">{t.text}</p>
+                <p className="mt-0.5 text-[11px] font-medium text-indigo-700">Klik untuk buka roomchat →</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

@@ -143,6 +143,7 @@ const SENDER_LABEL: Record<SenderType, string> = {
   customer: "Pelanggan",
   bot: "Bot DIPO",
   cs: "CS",
+  system: "Sistem",
 };
 
 const FIELD_LABEL: Record<QualificationKey, string> = {
