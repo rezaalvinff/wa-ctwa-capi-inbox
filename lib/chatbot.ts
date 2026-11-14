@@ -102,13 +102,12 @@ ATURAN BALASAN:
 - Bahasa Indonesia yang sopan, hangat, dan profesional. Sapa "Bapak/Ibu" (tambahkan nama bila sudah diketahui). Emoji secukupnya (maks 2).
 - Singkat: maksimal 3 kalimat pendek, cocok untuk WhatsApp. Ajukan HANYA SATU pertanyaan per balasan, mengikuti urutan data yang masih kurang.
 - Jangan menanyakan ulang data yang sudah diketahui (lihat DATA SAAT INI).
-- Tanggapi dulu pertanyaan pelanggan secara singkat, HANYA berdasarkan KNOWLEDGE BASE di bawah (harga OTR, lokasi dealer, spesifikasi, FAQ). Jika harga OTR berbeda per wilayah, gunakan wilayah domisili pelanggan bila sudah diketahui.
-- Setiap menyebut harga, tambahkan bahwa harga dapat berubah dan konfirmasi final oleh Sales Consultant.
-- Jika informasi tidak ada di KNOWLEDGE BASE, katakan Sales Consultant akan membantu detailnya. JANGAN mengarang angka harga, promo, diskon, DP, cicilan, stok, atau alamat.
-- Promo final, simulasi kredit final, negosiasi, dan jadwal test drive selalu diserahkan ke Sales Consultant.
+- Fokus utama: dapatkan 3 data (nama, domisili, unit) secepat mungkin, idealnya selesai dalam 3-4 balasan. Setiap balasan harus diakhiri pertanyaan untuk data yang masih kurang.
+- JANGAN PERNAH menyebut harga, OTR, DP, cicilan, angsuran, kredit, tenor, promo, diskon, cashback, stok, tukar tambah, atau jadwal test drive - walaupun ada di KNOWLEDGE BASE. Jika pelanggan menanyakannya, jawab: info tersebut akan diinfokan langsung oleh tim Sales Consultant kami, dan sebelumnya kami butuh 3 info dulu (nama, domisili, unit yang diminati) - lalu tanyakan data yang masih kurang.
+- KNOWLEDGE BASE hanya boleh dipakai untuk info umum: lokasi/alamat dealer, jam operasional, dan gambaran umum unit. Jangan mengarang informasi yang tidak ada di sana.
 - Jangan mengaku sebagai manusia. Jangan meminta data sensitif (KTP, alamat lengkap, nomor rekening).
 - Jika pelanggan enggan memberi data, hormati dan tetap ramah.
-- Jika pesan terbaru pelanggan berisi pertanyaan, isi juga answer_to_question dengan jawabannya saja (tanpa pertanyaan lanjutan). Jika tidak ada pertanyaan, null.
+- Jika pesan terbaru pelanggan berisi pertanyaan, isi juga answer_to_question dengan jawabannya saja (tanpa pertanyaan lanjutan; untuk harga/DP/cicilan cukup "akan diinfokan oleh tim Sales Consultant kami"). Jika tidak ada pertanyaan, null.
 - Jika ketiga data sudah lengkap setelah pesan ini, reply_message cukup ucapan terima kasih singkat (sistem akan mengirim konfirmasi handoff otomatis setelah answer_to_question).
 
 ATURAN EKSTRAKSI (hanya dari pesan PELANGGAN, bukan dari pesan bot/CS):
@@ -275,7 +274,7 @@ const STOP_WORDS = new Set(
     "lihat liat melihat dapat dapet tau tahu baru cuma hanya minta butuh perlu penasaran orang sendiri " +
     "xpander pajero xforce destinator triton canter cross sport halo hai hi selamat pagi siang sore malam " +
     "permisi apakah apa berapa gimana bagaimana kapan dimana mana masih ready stok tidak nggak gak enggak " +
-    "jual beli membeli kirim katalog brosur test drive tes rumah kantor kota kabupaten kab daerah area wilayah"
+    "jual beli membeli kirim katalog brosur test drive tes rumah kantor kota kabupaten kab daerah area wilayah nya alamatnya lokasinya dealer cabang showroom"
   ).split(/\s+/),
 );
 
@@ -301,7 +300,7 @@ function takeWords(capture: string, maxWords: number): string {
 }
 
 /** Semua pesan pelanggan setelah balasan terakhir bot/CS. */
-function pendingCustomerText(history: ChatTurn[]): string {
+export function pendingCustomerText(history: ChatTurn[]): string {
   const out: string[] = [];
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].sender !== "customer") break;
@@ -368,16 +367,23 @@ function extractName(text: string, expectingName: boolean, profileName: string |
 }
 
 function extractDomicile(text: string, expectingDomicile: boolean): string | null {
+  // Pertanyaan tentang dealer ("alamat dealer Jakarta dimana?") bukan domisili pelanggan.
+  const asksAboutDealer = /\b(?:dealer|cabang|showroom|bengkel|kantor)\b/i.test(text) || /\balamatnya\b/i.test(text);
+
   const explicit = [
-    /\b(?:domisili|berdomisili|tinggal|rumah|lokasi|alamat|posisi)\s*(?:saya|sy|aku|ku)?\s*(?:di|ada di|ada|:|=)?\s*(?:kota|kabupaten|kab\.?)?\s*([\p{L}][\p{L} .]{1,40})/iu,
-    /\b(?:kota|kabupaten|kab\.)\s+([\p{L}][\p{L} ]{1,30})/iu,
+    /\b(?:domisili|berdomisili|tinggal)\s*(?:saya|sy|aku|ku)?\s*(?:di|ada di|ada|:|=)?\s*(?:kota|kabupaten|kab\.?)?\s*([\p{L}][\p{L} .]{1,40})/iu,
+    // "alamat/rumah/lokasi" hanya bila jelas milik pelanggan: "rumah saya di ...", "alamat saya ..."
+    /\b(?:rumah|lokasi|alamat|posisi)\s+(?:saya|sy|aku|ku)\s*(?:di|ada di|ada|:|=)?\s*(?:kota|kabupaten|kab\.?)?\s*([\p{L}][\p{L} .]{1,40})/iu,
   ];
+  if (!asksAboutDealer) explicit.push(/\b(?:kota|kabupaten|kab\.)\s+([\p{L}][\p{L} ]{1,30})/iu);
   for (const re of explicit) {
     const m = text.match(re);
     if (!m) continue;
     const dom = normalizeDomicile(takeWords(m[1], 3));
     if (dom && !detectUnit(dom)) return dom;
   }
+
+  if (asksAboutDealer && !expectingDomicile) return null;
 
   const city = detectCity(text);
   if (city) return city;
@@ -420,18 +426,33 @@ function extractWithRules(input: ChatbotInput): Extraction {
   };
 }
 
-function intentLine(text: string): string | null {
+/** Topik yang selalu diserahkan ke Sales (bot tidak pernah menyebut angka/detailnya). */
+function salesTopics(text: string): string[] {
   const topics: string[] = [];
-  if (/\b(?:harga|price|berapa|otr|pricelist)\b/i.test(text)) topics.push("harga");
-  if (/\b(?:promo|diskon|potongan|cashback|hadiah)\b/i.test(text)) topics.push("promo");
-  if (/\b(?:kredit|cicil\w*|angsur\w*|dp|leasing|tenor|simulasi)\b/i.test(text)) topics.push("simulasi kredit");
-  if (/\b(?:test\s*drive|tes\s*drive|coba\s*mobil)\b/i.test(text)) topics.push("jadwal test drive");
-  if (/\b(?:stok|stock|ready|inden|warna)\b/i.test(text)) topics.push("ketersediaan unit");
+  if (/\b(?:harga|price|berapa|otr|pricelist|price\s*list)\b/i.test(text)) topics.push("harga");
+  if (/\b(?:dp|uang\s*muka|down\s*payment)\b/i.test(text)) topics.push("DP");
+  if (/\b(?:cicil\w*|angsur\w*|kredit|leasing|tenor|simulasi|bunga)\b/i.test(text)) topics.push("cicilan/angsuran");
+  if (/\b(?:promo|diskon|potongan|cashback|hadiah|bonus)\b/i.test(text)) topics.push("promo");
+  if (/\b(?:test\s*drive|tes\s*drive|coba\s*mobil)\b/i.test(text)) topics.push("test drive");
+  if (/\b(?:stok|stock|ready|inden)\b/i.test(text)) topics.push("ketersediaan unit");
   if (/\b(?:tukar\s*tambah|trade.?in)\b/i.test(text)) topics.push("tukar tambah");
-  if (topics.length === 0) return null;
-  const list = topics.length > 1 ? `${topics.slice(0, -1).join(", ")} dan ${topics.at(-1)}` : topics[0];
-  return `Untuk info ${list} terbaru akan dijelaskan langsung oleh Sales Consultant kami ya.`;
+  return topics;
 }
+
+function joinTopics(topics: string[]): string {
+  return topics.length > 1 ? `${topics.slice(0, -1).join(", ")} dan ${topics.at(-1)}` : topics[0];
+}
+
+/** Info harga/DP/cicilan dll. -> tim Sales, setelah 3 data terkumpul. */
+function salesDeflectLine(topics: string[], stillMissing: boolean): string | null {
+  if (topics.length === 0) return null;
+  const list = joinTopics(topics);
+  return stillMissing
+    ? `Untuk info ${list} akan diinfokan langsung oleh tim Sales Consultant kami 🙏 Untuk itu kami butuh 3 info dulu ya: *nama*, *domisili*, dan *unit Mitsubishi* yang diminati.`
+    : `Untuk info ${list} akan diinfokan langsung oleh tim Sales Consultant kami 🙏`;
+}
+
+const PRICE_LIKE_RE = /rp\s?[\d.]+|\d{2,3}(?:\.\d{3}){2,}|\bjuta\b|\bdp\b|cicil|angsur|tenor|cashback|diskon|promo/i;
 
 function questionFor(field: QualificationKey, lead: ChatbotLead): string {
   switch (field) {
@@ -477,18 +498,24 @@ function generateWithRules(input: ChatbotInput): ChatbotResult {
   if (extraction.unit) acks.push(`${extraction.unit} pilihan yang tepat! 👍`);
   if (acks.length) lines.push(acks.join(" "));
 
-  const kbLines = /\?|\b(harga|berapa|otr|alamat|lokasi|dealer|cabang|showroom|dimana|di mana|buka|jam|spesifikasi|spek|warna|tipe|varian)\b/i.test(pending)
-    ? searchKnowledge(input.knowledge ?? "", pending, { unit: merged.interested_unit, domicile: merged.domicile })
-    : [];
-  let intent = intentLine(pending);
+  // Harga/DP/cicilan/promo dll. tidak pernah dijawab bot -> diarahkan ke 3 data dulu, lalu tim Sales.
+  const topics = salesTopics(pending);
+  const deflect = salesDeflectLine(topics, Boolean(nextMissing));
+  // Knowledge base hanya untuk info umum (lokasi, jam buka, gambaran unit), tanpa angka harga.
+  const kbLines =
+    topics.length === 0 && /\?|\b(alamat|lokasi|dealer|cabang|showroom|dimana|di mana|buka|jam|spesifikasi|spek|warna|tipe|varian)\b/i.test(pending)
+      ? searchKnowledge(input.knowledge ?? "", pending, { unit: merged.interested_unit, domicile: merged.domicile }).filter(
+          (l) => !PRICE_LIKE_RE.test(l),
+        )
+      : [];
+  const intent = deflect;
   let answer: string | null = null;
-  if (kbLines.length) {
-    answer = `Berikut info dari kami:\n${kbLines.map((l) => `• ${l}`).join("\n")}\n_Harga & info dapat berubah, konfirmasi final oleh Sales Consultant._`;
+  if (deflect) {
+    answer = deflect;
+    lines.push(deflect);
+  } else if (kbLines.length) {
+    answer = `Berikut info dari kami:\n${kbLines.map((l) => `• ${l}`).join("\n")}`;
     lines.push(answer);
-    intent = null;
-  } else if (intent) {
-    answer = intent;
-    lines.push(intent);
   }
 
   if (nextMissing) {
@@ -559,4 +586,29 @@ export function simulateCustomerReply(lead: ChatbotLead): string {
     default:
       return pick(["Oke siap, ditunggu kabarnya ya", "Baik terima kasih", "Kapan bisa test drive?"]);
   }
+}
+
+// ---------------------------------------------------------------------
+// Hemat pesan: pesan "ok" / "makasih" / emoji tidak perlu dibalas bot
+// ---------------------------------------------------------------------
+const ACK_WORDS = new Set(
+  (
+    "ok oke okey okay okk okeh sip siap sippp baik baiklah noted mantap mantab makasih makasi terima kasih trims " +
+    "thanks thank thx tq ty you kak pak bu mas mbak min gan sis ya yah deh dong nih ditunggu tunggu"
+  ).split(/\s+/),
+);
+
+/**
+ * true bila pesan hanya ucapan/konfirmasi singkat ("ok", "makasih kak", "👍").
+ * Catatan: "ya/iya/betul" sendirian TIDAK dianggap ack karena bisa jawaban
+ * konfirmasi nama ("Apakah benar dengan X?").
+ */
+export function isAcknowledgementOnly(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  const stripped = t.replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0f]/gu, "").replace(/[!.,~\s]+/g, " ").trim();
+  if (!stripped) return true; // hanya emoji / tanda baca
+  if (/^(ya+|iya+|y|betul|benar|bener)$/.test(stripped)) return false;
+  const words = stripped.split(" ");
+  return words.length <= 4 && words.every((w) => ACK_WORDS.has(w));
 }

@@ -31,3 +31,11 @@ export function noteManualAssigned(adminName: string, agentName: string): string
 export function noteReturnedToAdmin(adminName: string): string {
   return `📌 ${adminName || "Admin"} mengembalikan lead ke Antrian Admin.`;
 }
+
+export function noteAdminHandles(domicile: string): string {
+  return `📌 Lead WARM (domisili "${domicile}") — ditangani Admin untuk dibalas manual.`;
+}
+
+export function noteBotLimit(max: number): string {
+  return `📌 Bot berhenti setelah ${max} balasan karena data belum lengkap — percakapan dilanjutkan Admin secara manual.`;
+}

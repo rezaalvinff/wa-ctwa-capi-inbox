@@ -307,7 +307,7 @@ export default function InboxTab({
 
   const lead: Lead | null = activeLead ?? leads.find((l) => l.id === selectedId) ?? null;
   const outside24h = lead ? Date.now() - new Date(lead.last_customer_message_at).getTime() >= WINDOW_24H_MS : false;
-  const canSimulateReply = Boolean(isAdmin && lead && (config?.mock_mode || lead.is_simulated));
+  const canSimulateReply = Boolean(isAdmin && lead && config?.mock_mode);
   const closed = lead ? isChatClosed(lead) : false;
   const hoursToClose = lead ? Math.max(0, (chatClosesAt(lead).getTime() - Date.now()) / 3_600_000) : 0;
   const qualDone = lead ? QUAL_ITEMS.filter((i) => Boolean(lead[i.key]?.trim())).length : 0;
@@ -493,7 +493,8 @@ export default function InboxTab({
         className={`${selectedId ? "hidden md:flex" : "flex"} w-full min-h-0 flex-col border-r border-slate-200 bg-white md:w-80 md:shrink-0 lg:w-96`}
       >
         <div className="border-b border-slate-200 p-4">
-          {isAdmin && (
+          {/* Tombol simulasi hanya untuk uji coba (MOCK_MODE=true). */}
+          {isAdmin && config?.mock_mode && (
           <div className="mb-3 grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -596,7 +597,9 @@ export default function InboxTab({
               <Inbox className="h-8 w-8 text-slate-300" />
               {leads.length === 0
                 ? isAdmin
-                  ? "Belum ada chat. Klik tombol simulasi untuk mengetes chatbot dari awal."
+                  ? config?.mock_mode
+                    ? "Belum ada chat. Klik tombol simulasi untuk mengetes chatbot dari awal."
+                    : "Belum ada chat masuk. Chat WhatsApp baru akan muncul otomatis di sini."
                   : "Belum ada lead yang dioper ke Anda. Lead WARM dari wilayah Anda akan muncul di sini otomatis."
                 : "Tidak ada prospek yang cocok dengan filter/pencarian."}
             </li>
@@ -653,8 +656,8 @@ export default function InboxTab({
                         </Badge>
                       )}
                       {isAdmin && !l.assigned_agent_id && l.status === "warm" && (
-                        <Badge className="bg-rose-50 text-rose-700 ring-rose-200" title="Tidak ada wilayah agent yang cocok">
-                          <Route className="h-3 w-3" /> Antrian Admin
+                        <Badge className="bg-rose-50 text-rose-700 ring-rose-200" title="Ditangani Admin">
+                          <Route className="h-3 w-3" /> {agents.length === 0 ? "Admin" : "Antrian Admin"}
                         </Badge>
                       )}
                       {isChatClosed(l) && (
@@ -971,7 +974,9 @@ export default function InboxTab({
                       <UserCheck className="h-4 w-4" /> {lead.assigned_agent?.full_name ?? "Agent"}
                     </span>
                   ) : lead.status === "warm" ? (
-                    <span className="font-medium text-rose-700">Antrian Admin (tidak ada wilayah agent yang cocok)</span>
+                    <span className="font-medium text-rose-700">
+                      {agents.length === 0 ? "Ditangani Admin" : "Antrian Admin (tidak ada wilayah agent yang cocok)"}
+                    </span>
                   ) : (
                     <span className="text-slate-600">Bot / Admin — dioper otomatis setelah lead WARM</span>
                   )}
