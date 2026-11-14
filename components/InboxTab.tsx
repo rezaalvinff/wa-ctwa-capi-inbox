@@ -524,7 +524,7 @@ export default function InboxTab({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari nama, nomor, kota, unit..."
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-red-500 focus:bg-white focus:ring-2 focus:ring-red-500/20"
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
 
@@ -616,7 +616,7 @@ export default function InboxTab({
                     setShowPanelMobile(false);
                   }}
                   className={`flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left transition ${
-                    isActive ? "bg-red-50/70" : "hover:bg-slate-50"
+                    isActive ? "bg-brand-50" : "hover:bg-slate-50"
                   }`}
                 >
                   <Avatar lead={l} />
@@ -656,7 +656,10 @@ export default function InboxTab({
                         </Badge>
                       )}
                       {isAdmin && !l.assigned_agent_id && l.status === "warm" && (
-                        <Badge className="bg-rose-50 text-rose-700 ring-rose-200" title="Ditangani Admin">
+                        <Badge
+                          className={agents.length === 0 ? "bg-brand-50 text-brand-800 ring-brand-200" : "bg-rose-50 text-rose-700 ring-rose-200"}
+                          title="Ditangani Admin"
+                        >
                           <Route className="h-3 w-3" /> {agents.length === 0 ? "Admin" : "Antrian Admin"}
                         </Badge>
                       )}
@@ -679,7 +682,7 @@ export default function InboxTab({
         {!lead ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-slate-500">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/70">
-              <MessageCircle className="h-8 w-8 text-red-600" />
+              <MessageCircle className="h-8 w-8 text-brand-600" />
             </div>
             <p className="text-sm font-medium text-slate-700">Pilih prospek untuk membuka roomchat</p>
             <p className="max-w-xs text-xs">
@@ -974,7 +977,7 @@ export default function InboxTab({
                       <UserCheck className="h-4 w-4" /> {lead.assigned_agent?.full_name ?? "Agent"}
                     </span>
                   ) : lead.status === "warm" ? (
-                    <span className="font-medium text-rose-700">
+                    <span className={`font-medium ${agents.length === 0 ? "text-brand-700" : "text-rose-700"}`}>
                       {agents.length === 0 ? "Ditangani Admin" : "Antrian Admin (tidak ada wilayah agent yang cocok)"}
                     </span>
                   ) : (
@@ -1129,7 +1132,7 @@ export default function InboxTab({
                         placeholder={item.placeholder}
                         list={item.key === "interested_unit" ? "mitsubishi-units" : undefined}
                         maxLength={120}
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                       />
                     </label>
                   ))}

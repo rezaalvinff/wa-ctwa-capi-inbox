@@ -11,7 +11,7 @@ const ROLE_LABEL: Record<UserRole, string> = { admin: "Admin", agent: "Agent" };
 
 export function RoleBadge({ role }: { role: UserRole }) {
   return role === "admin" ? (
-    <Badge className="bg-red-50 text-red-700 ring-red-200">
+    <Badge className="bg-brand-50 text-brand-800 ring-brand-200">
       <ShieldCheck className="h-3 w-3" /> Admin
     </Badge>
   ) : (
@@ -22,7 +22,7 @@ export function RoleBadge({ role }: { role: UserRole }) {
 }
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 
 export default function UsersTab({ active, currentUserId }: { active: boolean; currentUserId: string | null }) {
   const [users, setUsers] = useState<AppUser[] | null>(null);
@@ -97,7 +97,7 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
       <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-            <UserCog className="h-5 w-5 text-red-600" /> Kelola Pengguna
+            <UserCog className="h-5 w-5 text-brand-600" /> Kelola Pengguna
           </h2>
           <p className="mt-0.5 text-sm text-slate-500">
             <b>Admin</b> dapat mengakses semua fitur. <b>Agent</b> hanya melihat lead WARM yang dioper otomatis ke dirinya, berdasarkan
@@ -174,7 +174,7 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
             <button
               type="submit"
               disabled={creating}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-800 disabled:opacity-60"
             >
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Buat Akun
@@ -334,7 +334,7 @@ export default function UsersTab({ active, currentUserId }: { active: boolean; c
           >
             <div className="mb-3 flex items-center justify-between">
               <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-                <MapPin className="h-4 w-4 text-red-600" /> Wilayah {regionUser.full_name}
+                <MapPin className="h-4 w-4 text-brand-600" /> Wilayah {regionUser.full_name}
               </h3>
               <button type="button" onClick={() => setRegionUser(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label="Tutup">
                 <X className="h-4 w-4" />

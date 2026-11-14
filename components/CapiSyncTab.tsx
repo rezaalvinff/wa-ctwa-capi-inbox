@@ -322,7 +322,7 @@ export default function CapiSyncTab({
                       <button
                         type="button"
                         onClick={() => onOpenLead(l.id)}
-                        className="inline-flex items-center gap-1 text-left font-semibold text-slate-900 hover:text-red-600"
+                        className="inline-flex items-center gap-1 text-left font-semibold text-slate-900 hover:text-brand-700"
                         title="Buka roomchat"
                       >
                         {displayName(l)}

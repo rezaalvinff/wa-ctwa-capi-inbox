@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import {
   BookOpen,
   Bot,
-  Car,
   ChevronsLeft,
   ChevronsRight,
   FlaskConical,
@@ -169,13 +169,11 @@ export default function HubPage() {
         }`}
       >
         <div className={`flex items-center gap-2.5 border-b border-slate-100 py-3 ${collapsed ? "justify-center px-2" : "px-4"}`}>
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-red-500 to-red-700 text-white shadow-md shadow-red-600/25">
-            <Car className="h-5 w-5" />
-          </div>
+          <Image src="/dipo-logo.png" alt="Logo DIPO" width={40} height={40} priority className="h-10 w-10 shrink-0 drop-shadow-sm" />
           {!collapsed && (
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-bold leading-tight">Mitsubishi DIPO</h1>
-              <p className="truncate text-[11px] text-slate-500">Lead & CAPI Hub</p>
+              <h1 className="truncate text-base font-extrabold leading-tight tracking-tight text-brand-800">DIPO CRM</h1>
+              <p className="truncate text-[11px] text-slate-500">Mitsubishi DIPO · Lead & CAPI Hub</p>
             </div>
           )}
         </div>
@@ -192,17 +190,17 @@ export default function HubPage() {
                 onClick={() => setTab(item.key)}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={item.label}
-                className={`group relative flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-medium outline-none transition duration-150 focus-visible:ring-2 focus-visible:ring-red-500/40 ${
+                className={`group relative flex w-full items-center gap-3 rounded-xl py-2.5 text-sm font-medium outline-none transition duration-150 focus-visible:ring-2 focus-visible:ring-brand-500/40 ${
                   collapsed ? "justify-center px-2" : "px-3"
                 } ${
                   isActive
-                    ? "bg-gradient-to-r from-red-50 to-red-50/30 text-red-700"
+                    ? "bg-gradient-to-r from-brand-50 to-brand-50/30 text-brand-800"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
                 {/* Penanda menu aktif */}
                 <span
-                  className={`absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-red-600 transition-opacity ${
+                  className={`absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-brand-600 transition-opacity ${
                     isActive ? "opacity-100" : "opacity-0"
                   }`}
                   aria-hidden
@@ -210,8 +208,8 @@ export default function HubPage() {
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition duration-150 ${
                     isActive
-                      ? "bg-red-600 text-white shadow-sm shadow-red-600/30"
-                      : "bg-slate-100 text-slate-500 group-hover:scale-105 group-hover:bg-white group-hover:text-red-600 group-hover:shadow-sm"
+                      ? "bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-sm shadow-brand-600/30"
+                      : "bg-slate-100 text-slate-500 group-hover:scale-105 group-hover:bg-white group-hover:text-brand-600 group-hover:shadow-sm"
                   }`}
                 >
                   <Icon className="h-[18px] w-[18px]" />
@@ -258,14 +256,14 @@ export default function HubPage() {
             onClick={logout}
             disabled={loggingOut}
             aria-label="Logout"
-            className={`group relative flex w-full items-center gap-3 rounded-xl py-2 text-sm font-medium text-slate-600 outline-none transition hover:bg-red-50 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-60 ${
+            className={`group relative flex w-full items-center gap-3 rounded-xl py-2 text-sm font-medium text-slate-600 outline-none transition hover:bg-brand-50 hover:text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500/40 disabled:opacity-60 ${
               collapsed ? "justify-center px-2" : "px-3"
             }`}
           >
             {loggingOut ? (
               <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
             ) : (
-              <LogOut className="h-5 w-5 shrink-0 text-slate-400 transition group-hover:text-red-600" />
+              <LogOut className="h-5 w-5 shrink-0 text-slate-400 transition group-hover:text-brand-600" />
             )}
             {!collapsed && <span>Logout</span>}
             <SidebarTooltip title="Logout" description={`Keluar dari akun ${me.email}.`} />
@@ -275,7 +273,7 @@ export default function HubPage() {
             type="button"
             onClick={toggleCollapsed}
             aria-label={collapsed ? "Lebarkan menu" : "Lipat menu"}
-            className={`group relative flex w-full items-center gap-3 rounded-xl py-2 text-xs text-slate-400 outline-none transition hover:bg-slate-50 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-red-500/40 ${
+            className={`group relative flex w-full items-center gap-3 rounded-xl py-2 text-xs text-slate-400 outline-none transition hover:bg-slate-50 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 ${
               collapsed ? "justify-center px-2" : "px-3"
             }`}
           >
@@ -292,10 +290,10 @@ export default function HubPage() {
       {/* ================= TOP BAR (mobile) ================= */}
       <header className="shrink-0 border-b border-slate-200 bg-white md:hidden">
         <div className="flex items-center gap-2.5 px-4 py-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white">
-            <Car className="h-4 w-4" />
-          </div>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-bold">Mitsubishi DIPO Lead & CAPI Hub</h1>
+          <Image src="/dipo-logo.png" alt="Logo DIPO" width={32} height={32} priority className="h-8 w-8 shrink-0" />
+          <h1 className="min-w-0 flex-1 truncate text-base font-extrabold tracking-tight text-brand-800">
+            DIPO CRM <span className="text-xs font-medium text-slate-500">· Mitsubishi DIPO</span>
+          </h1>
           <button
             type="button"
             onClick={logout}
@@ -316,7 +314,7 @@ export default function HubPage() {
                 type="button"
                 onClick={() => setTab(item.key)}
                 className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${
-                  isActive ? "border-red-600 text-red-700" : "border-transparent text-slate-500"
+                  isActive ? "border-brand-600 text-brand-800" : "border-transparent text-slate-500"
                 }`}
               >
                 <Icon className="h-4 w-4" /> {item.short}
