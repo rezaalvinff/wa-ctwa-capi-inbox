@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
           } catch (err) {
             console.error("[webhook] Chatbot gagal:", errorMessage(err));
           }
-          // Lead yang sudah WARM lalu datang lagi dari klik iklan CTWA -> kirim event Lead bila belum.
+          // Lead yang sudah WARM lalu datang lagi dari klik iklan CTWA -> kirim event LeadSubmitted bila belum.
           if (fromAd) await sendLeadEventRealtime(leadId);
         }),
       );

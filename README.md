@@ -6,7 +6,7 @@ Inbox WhatsApp untuk tim CS/Sales dealer resmi Mitsubishi DIPO:
 - **Auto-tagging `cold` / `warm`**: lead otomatis menjadi `warm` begitu ketiga data terisi. Bot mengirim pesan konfirmasi lalu menyerahkan chat ke CS (`bot_active = false`).
 - **Manual takeover**: CS bisa mengambil alih chat kapan saja, atau mengaktifkan bot kembali.
 - **Atribusi Click-to-WhatsApp**: menangkap `ctwa_clid`, `ad_id`, dan `ad_headline` dari iklan Meta.
-- **Meta CAPI batch sync**: mengirim event `Lead` untuk prospek warm CTWA 7 hari terakhir, lewat tombol manual atau cron harian.
+- **Meta CAPI real-time**: mengirim event `LeadSubmitted` begitu prospek CTWA menjadi warm; cron harian mengirim ulang yang gagal.
 
 Stack: Next.js 15 (App Router), TypeScript, Tailwind CSS v4, Supabase (PostgreSQL), `lucide-react`, Gemini API (`fetch`), dan modul `crypto` bawaan Node.
 
@@ -25,7 +25,7 @@ app/
     leads/[id]/messages/route.ts    # GET detail lead + riwayat chat
     simulate/route.ts               # POST lead dummy CTWA/organik + balasan bot pertama
     simulate/reply/route.ts         # POST simulasi balasan pelanggan (multi-turn testing)
-    capi/sync-warm/route.ts         # POST batch kirim event 'Lead' ke Meta CAPI
+    capi/sync-warm/route.ts         # POST kirim ulang event LeadSubmitted yang Pending
     capi/warm-leads/route.ts        # GET prospek warm CTWA 7 hari + statistik (Tab 2)
     cron/capi-sync/route.ts         # GET dipanggil Vercel Cron (proteksi CRON_SECRET)
     config/route.ts                 # GET flag non-rahasia untuk UI (mock mode, engine AI)
@@ -189,7 +189,7 @@ npm run dev
 1. Login sebagai **Admin**. Di tab **Inbox & Chatbot**, klik **Simulasi Chat CTWA**. Lead dummy dibuat dan bot langsung menyapa serta menanyakan nama.
 2. Klik **Simulasi Balasan Customer** berulang kali (jawaban otomatis sesuai data yang masih kurang), atau ketik sendiri di kolom *"ketik sebagai pelanggan"*.
 3. Setelah nama, domisili, dan unit terkumpul, tag otomatis berubah menjadi **🔥 WARM**. Bot mengirim konfirmasi handoff dan beralih ke **Mode Manual CS**.
-4. Begitu WARM, event `Lead` langsung dikirim ke Meta CAPI (tanpa tombol), lalu lead dioper ke agent sesuai wilayah dengan catatan di roomchat. Isi `META_TEST_EVENT_CODE` agar event muncul di tab *Test events* Events Manager. Tanpa kredensial Meta, lead tampil *Pending Sync* di tab **Meta CAPI Sync**.
+4. Begitu WARM, event `LeadSubmitted` langsung dikirim ke Meta CAPI (tanpa tombol), lalu lead dioper ke agent sesuai wilayah dengan catatan di roomchat. Isi `META_TEST_EVENT_CODE` agar event muncul di tab *Test events* Events Manager. Tanpa kredensial Meta, lead tampil *Pending Sync* di tab **Meta CAPI Sync**.
 
 Lead simulasi (`is_simulated = true`) **tidak pernah** dikirimi pesan WhatsApp sungguhan, juga saat `MOCK_MODE=false`, karena nomor acaknya bisa milik orang lain. Simulasi balasan pelanggan hanya diizinkan untuk lead simulasi atau saat `MOCK_MODE=true`.
 
@@ -210,7 +210,7 @@ Edit manual di panel kanan juga menghitung ulang status. Jika lead menjadi warm 
 
 ## Meta CAPI Sync
 
-**Otomatis real-time:** begitu lead menjadi WARM, event `Lead` langsung dikirim ke Meta. Ini berlaku baik lead menjadi WARM lewat chatbot maupun lewat edit manual di panel kanan, tanpa menekan tombol apa pun (`sendLeadEventRealtime` di `lib/capi.ts`). Hasilnya tersimpan di `last_capi_response`.
+**Otomatis real-time:** begitu lead menjadi WARM, event `LeadSubmitted` langsung dikirim ke Meta. Ini berlaku baik lead menjadi WARM lewat chatbot maupun lewat edit manual di panel kanan, tanpa menekan tombol apa pun (`sendLeadEventRealtime` di `lib/capi.ts`). Hasilnya tersimpan di `last_capi_response`.
 
 Lead yang belum berhasil terkirim tetap berstatus **Pending**. Penyebabnya bisa kredensial Meta belum diisi atau Meta mengembalikan error. Lead Pending dikirim ulang otomatis oleh cron harian (`GET /api/cron/capi-sync`). Tombol **"Kirim Ulang yang Pending sekarang"** di Tab 2 hanya opsional, untuk mengirim ulang tanpa menunggu cron.
 
@@ -220,16 +220,16 @@ Semua jalur memakai syarat yang sama. Sebuah lead dikirim **hanya jika** memenuh
 2. `source = 'meta_ads'`
 3. `ctwa_clid` tidak null/kosong
 4. `created_at` **atau** `last_customer_message_at` dalam 7 hari terakhir
-5. `capi_sent_events` belum berisi `'Lead'`
+5. `capi_sent_events` belum berisi `'LeadSubmitted'` (atau `'Lead'` dari versi lama)
 
 Payload per lead (event dikirim satu per satu agar log per lead jelas, 5 paralel, maks. 500 per run):
 
 ```json
 {
   "data": [{
-    "event_name": "Lead",
+    "event_name": "LeadSubmitted",
     "event_time": 1763000000,
-    "event_id": "<lead_id>_Lead",
+    "event_id": "<lead_id>_LeadSubmitted",
     "action_source": "business_messaging",
     "messaging_channel": "whatsapp",
     "user_data": {
@@ -246,16 +246,16 @@ Payload per lead (event dikirim satu per satu agar log per lead jelas, 5 paralel
 
 | Parameter | Isi |
 | --- | --- |
-| `event_name` | `Lead` (prospek sudah tervalidasi / `warm`) |
+| `event_name` | `LeadSubmitted` (prospek sudah tervalidasi / `warm`). Untuk `action_source: business_messaging`, Meta **menolak** `Lead` (error 2804066, *Messaging event invalid event type*) dan hanya menerima nama event business messaging seperti `LeadSubmitted` atau `Purchase`. |
 | `event_time` | Unix timestamp (detik) saat lead menjadi warm (`warm_at`), atau waktu kirim bila `warm_at` sudah lewat 7 hari |
-| `event_id` | `<lead_id>_Lead`, unik per lead untuk deduplikasi di Events Manager |
+| `event_id` | `<lead_id>_LeadSubmitted`, unik per lead untuk deduplikasi di Events Manager |
 | `action_source` / `messaging_channel` | `business_messaging` / `whatsapp` |
 | `user_data.ctwa_clid` | Click ID iklan CTWA, kunci atribusi, **tidak di-hash** |
 | `user_data.ph` | Nomor dinormalisasi ke `628xxx` lalu SHA-256 |
 | `user_data.fn` / `ln` | Opsional. Dari `customer_name` (fallback `wa_profile_name`); sapaan Pak/Bu/Kak dan teks dalam kurung dibuang; huruf kecil, tanpa tanda baca/angka (aksen tetap UTF-8), lalu SHA-256. `fn` = kata pertama, `ln` = kata terakhir; `ln` tidak dikirim untuk nama satu kata dan inisial satu huruf diabaikan. |
 | `custom_data` | Opsional: `content_name` = unit diminati, `content_category` = domisili |
 
-- Jika sukses (HTTP 200): `'Lead'` ditambahkan ke `capi_sent_events` dan `capi_synced_at` diisi. Sukses maupun gagal, response Meta (beserta payload request dan `name_source` asal `fn`/`ln`) disimpan di `last_capi_response`.
+- Jika sukses (HTTP 200): `'LeadSubmitted'` ditambahkan ke `capi_sent_events` dan `capi_synced_at` diisi. Sukses maupun gagal, response Meta (beserta payload request dan `name_source` asal `fn`/`ln`) disimpan di `last_capi_response`.
 - `event_id` yang konsisten juga membuat Meta men-deduplikasi bila sync manual dan cron berjalan bersamaan.
 
 Cron di `vercel.json` berjalan `0 2 * * *` (UTC) = **09:00 WIB** setiap hari. Jika mengubah jadwal, ubah juga `CRON_SCHEDULE`/`CRON_LABEL` di `lib/config.ts` agar label di UI sama.

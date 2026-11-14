@@ -29,7 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { MITSUBISHI_UNITS } from "@/lib/mitsubishi";
-import { CHAT_CLOSE_HOURS, chatClosesAt, isChatClosed } from "@/lib/leads";
+import { CAPI_LEAD_EVENT, CHAT_CLOSE_HOURS, chatClosesAt, isChatClosed, isLeadEventSent } from "@/lib/leads";
 import type { AppConfig, AppUser, Lead, LeadSource, LeadStatus, LeadWithPreview, Message, SenderType } from "@/lib/types";
 import {
   Avatar,
@@ -95,7 +95,7 @@ interface CapiRealtime {
 
 function capiText(capi?: CapiRealtime): string {
   if (!capi) return "";
-  if (capi.status === "sent") return " ✅ Event Lead langsung terkirim ke Meta CAPI.";
+  if (capi.status === "sent") return ` ✅ Event ${CAPI_LEAD_EVENT} langsung terkirim ke Meta CAPI.`;
   if (capi.status === "failed") return ` ⚠️ Kirim Meta CAPI gagal: ${capi.reason ?? "error"}`;
   return ` (Meta CAPI: ${capi.reason ?? "dilewati"})`;
 }
@@ -1173,9 +1173,9 @@ export default function InboxTab({
             <Card title="Status Meta CAPI" icon={<Megaphone className="h-3.5 w-3.5" />}>
               {lead.source !== "meta_ads" || !lead.ctwa_clid ? (
                 <p className="text-xs text-slate-500">Prospek organik — tidak dikirim ke Meta Conversions API.</p>
-              ) : (lead.capi_sent_events ?? []).includes("Lead") ? (
+              ) : isLeadEventSent(lead.capi_sent_events) ? (
                 <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-                  <CheckCircle2 className="h-4 w-4" /> Event Lead terkirim otomatis {formatDateTime(lead.capi_synced_at)}
+                  <CheckCircle2 className="h-4 w-4" /> Event {CAPI_LEAD_EVENT} terkirim otomatis {formatDateTime(lead.capi_synced_at)}
                 </p>
               ) : lead.status === "warm" ? (
                 <p className="text-xs text-amber-700">
@@ -1183,7 +1183,7 @@ export default function InboxTab({
                   cron harian.
                 </p>
               ) : (
-                <p className="text-xs text-slate-500">Event Lead dikirim otomatis ke Meta begitu lead menjadi WARM.</p>
+                <p className="text-xs text-slate-500">Event {CAPI_LEAD_EVENT} dikirim otomatis ke Meta begitu lead menjadi WARM.</p>
               )}
             </Card>
             )}
