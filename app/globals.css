@@ -1,6 +1,18 @@
 @import "tailwindcss";
 
 @theme {
+  /* Warna brand DIPO, diambil dari logo (#00ADEF biru muda, #005597 biru tua). */
+  --color-brand-50: #e8f7fe;
+  --color-brand-100: #cdeefc;
+  --color-brand-200: #9edcf9;
+  --color-brand-300: #62c6f5;
+  --color-brand-400: #24b3f1;
+  --color-brand-500: #00adef;
+  --color-brand-600: #0a8bd0;
+  --color-brand-700: #0b6fb0;
+  --color-brand-800: #005597;
+  --color-brand-900: #063f70;
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }

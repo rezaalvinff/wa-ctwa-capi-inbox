@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Car, Eye, EyeOff, Loader2, LogIn, ShieldCheck } from "lucide-react";
+import Image from "next/image";
+import { AlertTriangle, Eye, EyeOff, Loader2, LogIn, ShieldCheck } from "lucide-react";
 
 /** Hanya izinkan redirect ke path internal (cegah open redirect). */
 function safeNext(): string {
@@ -42,13 +43,12 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-slate-100 via-white to-red-50 px-4 py-10">
+    <main className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-slate-100 via-white to-brand-50 px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-600 text-white shadow-md">
-            <Car className="h-6 w-6" />
-          </div>
-          <h1 className="mt-3 text-lg font-bold text-slate-900">Mitsubishi DIPO Lead & CAPI Hub</h1>
+          <Image src="/dipo-logo.png" alt="Logo DIPO" width={64} height={64} priority className="h-16 w-16 drop-shadow-sm" />
+          <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-brand-800">DIPO CRM</h1>
+          <p className="text-sm font-medium text-slate-600">Mitsubishi DIPO Lead & CAPI Hub</p>
           <p className="mt-1 text-sm text-slate-500">Masuk untuk mengelola chat prospek</p>
         </div>
 
@@ -63,7 +63,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="nama@dipo.co.id"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-500/20"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
           </label>
 
@@ -77,7 +77,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-3 pr-10 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-500/20"
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-3 pr-10 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
               />
               <button
                 type="button"
@@ -100,7 +100,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:opacity-60"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
             Masuk

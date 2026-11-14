@@ -16,7 +16,7 @@ interface KnowledgeResponse {
 type Notice = { type: "success" | "error" | "info"; text: string; details?: string[] } | null;
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20";
 
 function formatBytes(bytes: number | null): string {
   if (!bytes) return "";
@@ -149,7 +149,7 @@ export default function KnowledgeTab({ active }: { active: boolean }) {
       <div className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-            <BookOpen className="h-5 w-5 text-red-600" /> Knowledge Base Chatbot
+            <BookOpen className="h-5 w-5 text-brand-600" /> Knowledge Base Chatbot
           </h2>
           <p className="mt-0.5 text-sm text-slate-500">
             Materi aktif dibaca bot di <b>setiap balasan</b> untuk menjawab info umum (lokasi & jam buka dealer, gambaran unit, FAQ). Bot{" "}
@@ -221,11 +221,11 @@ export default function KnowledgeTab({ active }: { active: boolean }) {
                 void upload(e.dataTransfer.files);
               }}
               className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition ${
-                dragOver ? "border-red-400 bg-red-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                dragOver ? "border-brand-400 bg-brand-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
               }`}
             >
               {uploading ? (
-                <Loader2 className="h-8 w-8 animate-spin text-red-600" />
+                <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
               ) : (
                 <UploadCloud className="h-8 w-8 text-slate-400" />
               )}
@@ -274,7 +274,7 @@ export default function KnowledgeTab({ active }: { active: boolean }) {
               <button
                 type="submit"
                 disabled={savingManual}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-800 disabled:opacity-60"
               >
                 {savingManual && <Loader2 className="h-4 w-4 animate-spin" />}
                 Simpan Materi

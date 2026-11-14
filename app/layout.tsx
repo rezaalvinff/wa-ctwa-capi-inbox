@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CTWA Inbox — WhatsApp CS & Meta CAPI",
+  title: "DIPO CRM — Mitsubishi DIPO Lead & CAPI Hub",
   description: "Mini inbox WhatsApp untuk tim CS dengan atribusi Click-to-WhatsApp dan Meta Conversions API.",
 };
 
