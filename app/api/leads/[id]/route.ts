@@ -126,7 +126,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       await addSystemNote(id, manualAgentName ? noteManualAssigned(me.full_name, manualAgentName) : noteReturnedToAdmin(me.full_name));
     }
 
-    // Lead baru WARM -> kirim event Lead ke Meta CAPI secara real-time.
+    // Lead baru WARM -> kirim event LeadSubmitted ke Meta CAPI secara real-time.
     let capi: RealtimeCapiResult | undefined;
     if (becameWarm) capi = await sendLeadEventRealtime(id);
 

@@ -7,7 +7,7 @@ export const maxDuration = 300;
 
 /**
  * POST /api/capi/sync-warm
- * Kirim event 'Lead' ke Meta CAPI untuk semua prospek:
+ * Kirim event LeadSubmitted ke Meta CAPI untuk semua prospek:
  * status warm + source meta_ads + ctwa_clid terisi + aktif 7 hari terakhir + belum pernah terkirim.
  */
 export async function POST() {

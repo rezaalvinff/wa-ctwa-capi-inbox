@@ -17,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { AppConfig, CapiSyncSummary, WarmCapiLead } from "@/lib/types";
+import { CAPI_LEAD_EVENT } from "@/lib/leads";
 import { Badge, CopyButton, SourceBadge, api, displayName, errText, formatDateTime, relativeTime } from "@/components/ui";
 
 const POLL_INTERVAL_MS = 15000;
@@ -167,7 +168,7 @@ export default function CapiSyncTab({
           <StatCard
             label="Sudah Terkirim ke Meta (Lead Sent)"
             value={stats.sent}
-            hint="event 'Lead' sukses (HTTP 200)"
+            hint={`event ${CAPI_LEAD_EVENT} sukses (HTTP 200)`}
             icon={<CheckCircle2 className="h-5 w-5 text-emerald-600" />}
             tone="bg-emerald-50"
           />
@@ -179,14 +180,14 @@ export default function CapiSyncTab({
             <div className="space-y-2 text-sm text-slate-700">
               <p className="flex items-center gap-2 font-semibold text-emerald-800">
                 <Zap className="h-4 w-4" />
-                Auto-send real-time AKTIF — event Lead dikirim otomatis ke Meta begitu lead CTWA menjadi WARM
+                Auto-send real-time AKTIF — event {CAPI_LEAD_EVENT} dikirim otomatis ke Meta begitu lead CTWA menjadi WARM
               </p>
               <p className="flex items-center gap-2 text-xs text-slate-600">
                 <CalendarClock className="h-3.5 w-3.5 text-slate-500" />
                 Cadangan otomatis: {config?.cron_label ?? "setiap hari (Vercel Cron)"} mengirim ulang yang masih Pending / gagal.
               </p>
               <p className="text-xs text-slate-500">
-                Event <code className="rounded bg-white px-1 ring-1 ring-slate-200">Lead</code> dengan action_source{" "}
+                Event <code className="rounded bg-white px-1 ring-1 ring-slate-200">{CAPI_LEAD_EVENT}</code> dengan action_source{" "}
                 <code className="rounded bg-white px-1 ring-1 ring-slate-200">business_messaging</code> via WhatsApp. user_data:{" "}
                 <code className="rounded bg-white px-1 ring-1 ring-slate-200">ctwa_clid</code> (tanpa hash),{" "}
                 <code className="rounded bg-white px-1 ring-1 ring-slate-200">ph</code> dan nama{" "}

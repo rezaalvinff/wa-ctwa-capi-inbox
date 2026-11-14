@@ -1,5 +1,5 @@
 /**
- * Meta Conversions API — batch sync event 'Lead' untuk prospek WARM dari
+ * Meta Conversions API — event 'LeadSubmitted' untuk prospek WARM dari
  * Click-to-WhatsApp Meta Ads dalam 7 hari terakhir.
  */
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -7,9 +7,10 @@ import { hashPhone, sha256Hex } from "@/lib/phone";
 import { normalizeName } from "@/lib/mitsubishi";
 import { CAPI_WINDOW_DAYS, hasCapiConfig } from "@/lib/config";
 import { GRAPH_API_VERSION, errorMessage } from "@/lib/http";
+import { CAPI_LEAD_EVENT, isLeadEventSent } from "@/lib/leads";
 import type { CapiSyncLeadLog, CapiSyncSummary, Lead, WarmCapiLead } from "@/lib/types";
 
-const EVENT_NAME = "Lead";
+const EVENT_NAME = CAPI_LEAD_EVENT;
 const MAX_LEADS_PER_RUN = 500;
 const CONCURRENCY = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,7 +54,7 @@ export async function fetchWarmCtwaLeads(): Promise<WarmCapiLead[]> {
 
   return ((data ?? []) as Lead[])
     .filter((lead) => isWarmCtwaInWindow(lead, since))
-    .map((lead) => ({ ...lead, capi_state: sentEvents(lead).includes(EVENT_NAME) ? "sent" : "pending" }));
+    .map((lead) => ({ ...lead, capi_state: isLeadEventSent(lead.capi_sent_events) ? "sent" : "pending" }));
 }
 
 /** event_time = waktu lead menjadi warm (bila masih dalam 7 hari), selain itu sekarang. */
@@ -200,7 +201,7 @@ async function sendLeadEvent(lead: Lead): Promise<CapiSyncLeadLog> {
   };
 }
 
-/** Kirim event 'Lead' untuk semua prospek warm CTWA 7 hari terakhir yang belum terkirim. */
+/** Kirim event LeadSubmitted untuk semua prospek warm CTWA 7 hari terakhir yang belum terkirim. */
 export async function syncWarmLeads(trigger: "manual" | "cron"): Promise<CapiSyncSummary> {
   const startedAt = new Date().toISOString();
   const base = { trigger, started_at: startedAt };
@@ -265,7 +266,7 @@ export interface RealtimeCapiResult {
 }
 
 /**
- * Kirim event 'Lead' untuk 1 lead segera setelah menjadi WARM, bila memenuhi
+ * Kirim event LeadSubmitted untuk 1 lead segera setelah menjadi WARM, bila memenuhi
  * syarat (meta_ads + ctwa_clid + 7 hari + belum pernah terkirim). Gagal / belum
  * dikonfigurasi -> tetap Pending dan akan dicoba ulang oleh cron harian.
  * Tidak melempar error.
@@ -277,7 +278,7 @@ export async function sendLeadEventRealtime(leadId: string): Promise<RealtimeCap
     if (!data) return { status: "skipped", reason: "Lead tidak ditemukan." };
     const lead = data as Lead;
 
-    if (sentEvents(lead).includes(EVENT_NAME)) return { status: "skipped", reason: "Event Lead sudah pernah terkirim." };
+    if (isLeadEventSent(lead.capi_sent_events)) return { status: "skipped", reason: `Event ${EVENT_NAME} sudah pernah terkirim.` };
     if (lead.status !== "warm") return { status: "skipped", reason: "Lead belum WARM." };
     if (lead.source !== "meta_ads" || !lead.ctwa_clid?.trim()) {
       return { status: "skipped", reason: "Bukan lead Click-to-WhatsApp Meta Ads (organik) - tidak dikirim ke CAPI." };

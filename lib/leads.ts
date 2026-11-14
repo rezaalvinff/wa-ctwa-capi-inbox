@@ -48,3 +48,18 @@ export function chatClosesAt(lead: ActivityFields): Date {
 export function isChatClosed(lead: ActivityFields, now = Date.now()): boolean {
   return now - activityMs(lead) >= CHAT_CLOSE_MS;
 }
+
+// ---------------------------------------------------------------------
+// Meta CAPI
+// ---------------------------------------------------------------------
+/**
+ * Nama event untuk lead WARM. Untuk action_source "business_messaging"
+ * (WhatsApp/CTWA), Meta hanya menerima nama standar business messaging:
+ * "Lead" ditolak (error 2804066), yang benar "LeadSubmitted".
+ */
+export const CAPI_LEAD_EVENT = "LeadSubmitted";
+
+/** Sudah terkirim? ("Lead" = nama lama, tetap dianggap terkirim agar tidak dobel.) */
+export function isLeadEventSent(events: unknown): boolean {
+  return Array.isArray(events) && (events.includes(CAPI_LEAD_EVENT) || events.includes("Lead"));
+}

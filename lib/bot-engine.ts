@@ -23,7 +23,7 @@ export interface BotRunResult {
   became_warm?: boolean;
   /** Agent yang menerima lead saat menjadi WARM (null = Antrian Admin). */
   assigned_agent?: Pick<AgentCandidate, "id" | "full_name"> | null;
-  /** Hasil kirim event Lead ke Meta CAPI secara real-time saat lead menjadi WARM. */
+  /** Hasil kirim event LeadSubmitted ke Meta CAPI secara real-time saat lead menjadi WARM. */
   capi?: RealtimeCapiResult;
   lead?: Lead;
   reply?: Message;
@@ -169,7 +169,7 @@ export async function runBotForInbound(
     .single();
   if (replyError) throw replyError;
 
-  // Setelah handoff: catatan oper di roomchat + kirim event Lead ke Meta CAPI (real-time).
+  // Setelah handoff: catatan oper di roomchat + kirim event LeadSubmitted ke Meta CAPI (real-time).
   let capi: RealtimeCapiResult | undefined;
   if (becameWarm) {
     const domicile = updatedLead.domicile ?? "";
