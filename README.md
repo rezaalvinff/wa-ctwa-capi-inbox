@@ -204,7 +204,7 @@ Lead simulasi (`is_simulated = true`) **tidak pernah** dikirimi pesan WhatsApp s
 
 ## Dashboard
 
-Menu ada di **sidebar kiri** (Inbox & Chatbot, Meta CAPI Sync, Knowledge Base, Pengguna). Sidebar bisa dilipat menjadi ikon saja, dan otomatis terlipat di layar < 1440px. Di mobile, menu pindah ke atas.
+Menu ada di **sidebar kiri** (Inbox & Chatbot, Meta CAPI Sync, Knowledge Base, Pengguna). Sidebar bisa dilipat menjadi ikon saja, dan otomatis terlipat di layar < 1440px. Arahkan kursor ke menu untuk melihat keterangannya. Pindah menu cepat dengan **Alt+1** sampai **Alt+4**. Di mobile, menu pindah ke atas.
 
 Tombol **Simulasi Chat CTWA/Organik** dan **Simulasi Balasan Customer** hanya muncul saat `MOCK_MODE=true`.
 
