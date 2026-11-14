@@ -62,8 +62,14 @@ const MAX_HISTORY_TURNS = 24;
 export async function generateBotReply(input: ChatbotInput): Promise<ChatbotResult> {
   if (hasGemini()) {
     try {
-      const result = await generateWithGemini(input);
-      return complementExtraction(result, input);
+      const result = complementExtraction(await generateWithGemini(input), input);
+      // Balasan pertama selalu memakai pembuka baku (bukan karangan AI).
+      if (isFirstContact(input.history)) {
+        const merged = mergeExtraction(input.lead, result.extracted_name, result.extracted_domicile, result.extracted_unit);
+        result.reply_message = composeReply(merged, { firstContact: true, salesTopics: salesTopics(pendingCustomerText(input.history)) });
+      }
+      result.reply_message = cleanBotText(result.reply_message);
+      return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[chatbot] Gemini gagal, memakai fallback rule-based:", message);
@@ -73,46 +79,70 @@ export async function generateBotReply(input: ChatbotInput): Promise<ChatbotResu
   return generateWithRules(input);
 }
 
-/** Pesan konfirmasi saat lead menjadi warm (handoff ke Sales/CS). */
+// ---------------------------------------------------------------------
+// Gaya bahasa CS (singkat, natural, tanpa format bintang)
+// ---------------------------------------------------------------------
+/** Nama persona CS bot (env BOT_CS_NAME, default "Galuh"). */
+export function csName(): string {
+  return process.env.BOT_CS_NAME?.trim() || "Galuh";
+}
+
+/** Kalimat pembuka baku di balasan pertama. */
+export function openerLine(): string {
+  return `Halo Bapak/Ibu, dengan saya ${csName()} CS Dealer Mitsubishi DIPO.`;
+}
+
+/** Hapus format WhatsApp (*tebal*, _miring_, ~coret~) & rapikan spasi. */
+export function cleanBotText(text: string): string {
+  return text
+    .replace(/\*/g, "")
+    .replace(/(^|[\s(])[_~]([^_~\n]+)[_~](?=[\s).,!?]|$)/g, "$1$2")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isFirstContact(history: ChatTurn[]): boolean {
+  return !history.some((t) => t.sender !== "customer");
+}
+
+function mergeExtraction(lead: ChatbotLead, name: string | null, domicile: string | null, unit: string | null): ChatbotLead {
+  return {
+    ...lead,
+    customer_name: lead.customer_name || normalizeName(name),
+    domicile: lead.domicile || normalizeDomicile(domicile),
+    interested_unit: lead.interested_unit || unit,
+  };
+}
+
+/** Pesan saat ketiga data lengkap (handoff ke tim sales). */
 export function buildHandoffMessage(lead: Pick<Lead, "customer_name" | "domicile" | "interested_unit">): string {
-  const name = lead.customer_name ?? "";
-  const dom = lead.domicile ?? "";
-  const unit = lead.interested_unit ?? "";
-  return [
-    `Terima kasih, Bapak/Ibu ${name} 🙏 Data Anda sudah lengkap:`,
-    `• Nama: ${name}`,
-    `• Domisili: ${dom}`,
-    `• Unit diminati: Mitsubishi ${unit}`,
-    "",
-    `Tim Sales Consultant Mitsubishi DIPO area ${dom} akan segera menghubungi Bapak/Ibu untuk info promo terbaru dan simulasi kredit ${unit}. Mohon ditunggu ya 😊`,
-  ].join("\n");
+  const who = lead.customer_name ? `Bapak/Ibu ${lead.customer_name}` : "Bapak/Ibu";
+  return `Baik ${who}, saya izin langsung sambungkan dengan tim sales kami untuk diberikan info promo dan penawarannya ya. Segera dihubungi, mohon ditunggu 🙏`;
 }
 
 // ---------------------------------------------------------------------
 // Gemini
 // ---------------------------------------------------------------------
-const SYSTEM_INSTRUCTION = `Anda adalah "Asisten Virtual Resmi Mitsubishi DIPO", dealer resmi Mitsubishi Motors di Indonesia, yang membalas chat WhatsApp calon pembeli.
+const SYSTEM_INSTRUCTION = `Anda adalah CS Dealer Mitsubishi DIPO yang membalas chat WhatsApp calon pembeli. Tulis seperti CS manusia: singkat, ramah, mengalir, tidak kaku.
 
-TUJUAN: kumpulkan 3 data secara natural dan bertahap (tidak kaku seperti formulir):
-1. Nama / nama panggilan pelanggan
-2. Domisili (kota/kabupaten tempat tinggal)
-3. Unit Mitsubishi yang diminati (${MITSUBISHI_UNITS.join(", ")}, dll.)
+TUJUAN: dapatkan nama, domisili (kota/kabupaten), dan unit Mitsubishi yang diminati (${MITSUBISHI_UNITS.join(", ")}, dll.).
+Urutan alami: tanyakan nama dan domisili dulu, setelah itu tanyakan unit yang diminati.
 
-ATURAN BALASAN:
-- Bahasa Indonesia yang sopan, hangat, dan profesional. Sapa "Bapak/Ibu" (tambahkan nama bila sudah diketahui). Emoji secukupnya (maks 2).
-- Singkat: maksimal 3 kalimat pendek, cocok untuk WhatsApp. Ajukan HANYA SATU pertanyaan per balasan, mengikuti urutan data yang masih kurang.
+GAYA BALASAN:
+- Maksimal 2 kalimat pendek (idealnya di bawah 25 kata). Bahasa Indonesia santai-sopan, sapa "Bapak/Ibu" (+ nama bila sudah tahu).
+- JANGAN memakai tanda bintang, garis bawah, atau format tebal/miring apa pun. Tanpa bullet/daftar. Emoji paling banyak 1, boleh tanpa emoji.
+- JANGAN pernah menyebut bahwa Anda "butuh 3 data/info" atau menjelaskan proses. Cukup tanyakan secara natural, satu hal yang masih kurang.
 - Jangan menanyakan ulang data yang sudah diketahui (lihat DATA SAAT INI).
-- Fokus utama: dapatkan 3 data (nama, domisili, unit) secepat mungkin, idealnya selesai dalam 3-4 balasan. Setiap balasan harus diakhiri pertanyaan untuk data yang masih kurang.
-- JANGAN PERNAH menyebut harga, OTR, DP, cicilan, angsuran, kredit, tenor, promo, diskon, cashback, stok, tukar tambah, atau jadwal test drive - walaupun ada di KNOWLEDGE BASE. Jika pelanggan menanyakannya, jawab: info tersebut akan diinfokan langsung oleh tim Sales Consultant kami, dan sebelumnya kami butuh 3 info dulu (nama, domisili, unit yang diminati) - lalu tanyakan data yang masih kurang.
-- KNOWLEDGE BASE hanya boleh dipakai untuk info umum: lokasi/alamat dealer, jam operasional, dan gambaran umum unit. Jangan mengarang informasi yang tidak ada di sana.
-- Jangan mengaku sebagai manusia. Jangan meminta data sensitif (KTP, alamat lengkap, nomor rekening).
-- Jika pelanggan enggan memberi data, hormati dan tetap ramah.
-- Jika pesan terbaru pelanggan berisi pertanyaan, isi juga answer_to_question dengan jawabannya saja (tanpa pertanyaan lanjutan; untuk harga/DP/cicilan cukup "akan diinfokan oleh tim Sales Consultant kami"). Jika tidak ada pertanyaan, null.
-- Jika ketiga data sudah lengkap setelah pesan ini, reply_message cukup ucapan terima kasih singkat (sistem akan mengirim konfirmasi handoff otomatis setelah answer_to_question).
+- Jika ditanya harga, OTR, DP, cicilan, angsuran, kredit, promo, diskon, stok, tukar tambah, atau test drive: JANGAN sebut angka/detail apa pun. Jawab singkat bahwa itu nanti dibantu langsung oleh tim sales, lalu lanjut tanyakan data yang masih kurang.
+- KNOWLEDGE BASE hanya untuk info umum (lokasi/alamat dealer, jam buka, gambaran unit). Jangan mengarang.
+- Jangan meminta data sensitif (KTP, alamat lengkap, rekening). Jika pelanggan enggan, tetap ramah.
+- answer_to_question: isi hanya jika pelanggan menanyakan info umum yang bisa dijawab dari KNOWLEDGE BASE (jawaban saja, 1 kalimat). Untuk harga/DP/cicilan/promo, dan bila tidak ada pertanyaan, isi null.
+- Jika ketiga data sudah lengkap setelah pesan ini, reply_message cukup "Baik, terima kasih." (sistem akan mengirim pesan penyambungan ke tim sales).
 
 ATURAN EKSTRAKSI (hanya dari pesan PELANGGAN, bukan dari pesan bot/CS):
-- extracted_name: nama yang disebut pelanggan sebagai namanya sendiri, tanpa sapaan (Pak/Bu/Kak). Nama profil WhatsApp hanya boleh dipakai jika pelanggan mengonfirmasinya. null jika tidak ada.
-- extracted_domicile: kota/kabupaten domisili pelanggan (mis. "Bekasi", "Surabaya"). null jika tidak disebut.
+- extracted_name: nama yang disebut pelanggan sebagai namanya sendiri, tanpa sapaan (Pak/Bu/Kak). Jangan pakai nama profil WhatsApp kecuali pelanggan mengonfirmasinya. null jika tidak ada.
+- extracted_domicile: kota/kabupaten tempat tinggal pelanggan (mis. "Bekasi"). Kota yang disebut saat menanyakan dealer BUKAN domisili. null jika tidak disebut.
 - extracted_unit: unit Mitsubishi yang diminati dengan nama baku (${MITSUBISHI_UNITS.join(", ")}, atau model Mitsubishi lain). null jika tidak disebut.
 - Isi juga field ekstraksi bila datanya ada di pesan pelanggan sebelumnya tetapi belum tercatat di DATA SAAT INI.`;
 
@@ -274,12 +304,13 @@ const STOP_WORDS = new Set(
     "lihat liat melihat dapat dapet tau tahu baru cuma hanya minta butuh perlu penasaran orang sendiri " +
     "xpander pajero xforce destinator triton canter cross sport halo hai hi selamat pagi siang sore malam " +
     "permisi apakah apa berapa gimana bagaimana kapan dimana mana masih ready stok tidak nggak gak enggak " +
-    "jual beli membeli kirim katalog brosur test drive tes rumah kantor kota kabupaten kab daerah area wilayah nya alamatnya lokasinya dealer cabang showroom"
+    "jual beli membeli kirim katalog brosur test drive tes rumah kantor kota kabupaten kab daerah area wilayah nya alamatnya lokasinya dealer cabang showroom " +
+    "hmm hm hmmm emm em eh oh wah wih waduh wkwk wkwkwk haha hehe hihi lho loh kan tes test coba"
   ).split(/\s+/),
 );
 
 const GREETING_RE =
-  /^(?:h[ae]l+o+|hai+|hi+|hey|p|ping|permisi|assalamu.?alaikum|selamat\s+\w+|pagi|siang|sore|malam|min|admin|kak|gan|tes|test)\b/i;
+  /^(?:h[ae]l+o+|hai+|hi+|hey|p|ping|permisi|assalamu.?alaikum|selamat\s+\w+|pagi|siang|sore|malam|min|admin|kak|gan|tes|test|h+m+|e+m+|eh|oh|wah|wk(?:wk)*|ha(?:ha)+|he(?:he)+)\b/i;
 const QUESTION_RE = /\?|\b(?:berapa|apa|apakah|gimana|bagaimana|kapan|dimana|di mana|bisa|boleh|ada)\b/i;
 const YES_RE = /^(?:iya|ya|y|yup|yes|betul|benar|bener|iyaa+|ya betul|betul sekali|benar sekali)\b/i;
 
@@ -366,7 +397,15 @@ function extractName(text: string, expectingName: boolean, profileName: string |
   return null;
 }
 
-function extractDomicile(text: string, expectingDomicile: boolean): string | null {
+interface DomicileOptions {
+  /** Terima pola "di X" / "dari X" (bot baru menanyakan domisili). */
+  prepositions: boolean;
+  /** Terima seluruh pesan pendek sebagai domisili (hanya bila nama sudah diketahui). */
+  wholeText: boolean;
+}
+
+function extractDomicile(text: string, opts: DomicileOptions): string | null {
+  const expectingDomicile = opts.prepositions;
   // Pertanyaan tentang dealer ("alamat dealer Jakarta dimana?") bukan domisili pelanggan.
   const asksAboutDealer = /\b(?:dealer|cabang|showroom|bengkel|kantor)\b/i.test(text) || /\balamatnya\b/i.test(text);
 
@@ -396,6 +435,7 @@ function extractDomicile(text: string, expectingDomicile: boolean): string | nul
     if (dom && !detectUnit(dom)) return dom;
   }
 
+  if (!opts.wholeText) return null;
   const short = text.trim().replace(/[.!]+$/, "");
   const words = short.split(/\s+/);
   if (
@@ -414,15 +454,63 @@ function extractDomicile(text: string, expectingDomicile: boolean): string | nul
 function extractWithRules(input: ChatbotInput): Extraction {
   const { lead, history } = input;
   const text = pendingCustomerText(history);
-  const expecting = missingFields(lead)[0] ?? null;
   const lastBot = lastOutboundBotText(history);
+  const needName = !isFilled(lead.customer_name);
+  const needDomicile = !isFilled(lead.domicile);
+  // Pembuka menanyakan nama + domisili sekaligus, jadi keduanya "sedang ditanyakan".
+  const askedTogether = needName && needDomicile;
+
+  let domicile: string | null = null;
+  let name: string | null = null;
+
+  // Jawaban gabungan "Budi, Bekasi" / "Budi - Cikampek".
+  if (askedTogether) {
+    const parts = text.split(/\s*[,;\n/-]\s*/).filter(Boolean);
+    if (parts.length === 2 && parts.every((p) => p.split(/\s+/).length <= 3) && !detectUnit(text)) {
+      const [a, b] = parts;
+      const aCity = detectCity(a);
+      const [namePart, domPart] = aCity && !detectCity(b) ? [b, a] : [a, b];
+      const nameRaw = namePart.replace(/^(?:saya|aku|sy|nama\s*saya|nama|dengan|dgn)\s+/i, "").trim();
+      const domRaw = domPart.replace(/^(?:di|dari|domisili|tinggal\s+di|kota|kab\.?|kabupaten)\s+/i, "").trim();
+      // Sapaan / kata umum ("Halo kak, mau tanya promo") bukan nama & domisili.
+      const plainWords = (t: string) =>
+        t.length > 0 &&
+        /^[\p{L}' .]+$/u.test(t) &&
+        t.split(/\s+/).every((w) => !STOP_WORDS.has(w.toLowerCase().replace(/[.']/g, "")));
+      const n = !GREETING_RE.test(nameRaw) && plainWords(nameRaw) ? normalizeName(nameRaw) : null;
+      const d = !GREETING_RE.test(domRaw) && plainWords(domRaw) && salesTopics(domRaw).length === 0 ? normalizeDomicile(domRaw) : null;
+      if (n && d) {
+        name = n;
+        domicile = d;
+      }
+    }
+  }
+
+  if (needDomicile && !domicile) {
+    domicile = extractDomicile(text, {
+      prepositions: needDomicile,
+      wholeText: !needName, // "Bekasi" saja baru dianggap domisili bila nama sudah diketahui
+    });
+  }
+
+  if (needName && !name) {
+    // Buang bagian domisili supaya "Budi Bekasi" / "Budi dari Bekasi" tetap menangkap nama.
+    let nameText = text;
+    if (domicile) {
+      const escaped = domicile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      nameText = nameText
+        .replace(new RegExp(`\\b(?:di|dari|domisili|tinggal di|kota|kab\\.?|kabupaten)?\\s*${escaped}\\b`, "iu"), " ")
+        .replace(/[,.;]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+    name = extractName(nameText, true, lead.wa_profile_name, lastBot);
+  }
 
   return {
     unit: isFilled(lead.interested_unit) ? null : detectUnit(text),
-    domicile: isFilled(lead.domicile) ? null : extractDomicile(text, expecting === "domicile"),
-    name: isFilled(lead.customer_name)
-      ? null
-      : extractName(text, expecting === "customer_name", lead.wa_profile_name, lastBot),
+    domicile,
+    name,
   };
 }
 
@@ -443,35 +531,51 @@ function joinTopics(topics: string[]): string {
   return topics.length > 1 ? `${topics.slice(0, -1).join(", ")} dan ${topics.at(-1)}` : topics[0];
 }
 
-/** Info harga/DP/cicilan dll. -> tim Sales, setelah 3 data terkumpul. */
-function salesDeflectLine(topics: string[], stillMissing: boolean): string | null {
+/** Info harga/DP/cicilan dll. -> dibantu tim sales (tanpa menyebut syarat data). */
+function salesDeflectLine(topics: string[]): string | null {
   if (topics.length === 0) return null;
-  const list = joinTopics(topics);
-  return stillMissing
-    ? `Untuk info ${list} akan diinfokan langsung oleh tim Sales Consultant kami 🙏 Untuk itu kami butuh 3 info dulu ya: *nama*, *domisili*, dan *unit Mitsubishi* yang diminati.`
-    : `Untuk info ${list} akan diinfokan langsung oleh tim Sales Consultant kami 🙏`;
+  return `Untuk ${joinTopics(topics)}nya nanti dibantu langsung oleh tim sales kami ya.`;
+}
+
+interface ComposeOptions {
+  firstContact: boolean;
+  salesTopics?: string[];
+  /** Info umum dari knowledge base (1 kalimat). */
+  info?: string | null;
+  /** Nama yang baru saja didapat di pesan ini. */
+  justGotName?: boolean;
+}
+
+/** Susun balasan singkat ala CS manusia untuk data yang masih kurang. */
+function composeReply(lead: ChatbotLead, opts: ComposeOptions): string {
+  const needName = !isFilled(lead.customer_name);
+  const needDomicile = !isFilled(lead.domicile);
+  const needUnit = !isFilled(lead.interested_unit);
+  const who = lead.customer_name ? `Bapak/Ibu ${lead.customer_name}` : "Bapak/Ibu";
+  const deflect = salesDeflectLine(opts.salesTopics ?? []);
+
+  let question: string;
+  if (needName && needDomicile) question = "Kalo boleh tau dengan Bapak/Ibu siapa ini dan domisilinya dimana?";
+  else if (needName) question = "Kalo boleh tau dengan Bapak/Ibu siapa ini?";
+  else if (needDomicile) question = opts.firstContact || opts.justGotName ? `Baik ${who}, domisilinya dimana ya?` : "Kalo boleh tau domisilinya dimana ya?";
+  else if (needUnit) question = `Baik ${who}, tertarik dengan unit Mitsubishi apa ya?`;
+  else question = `Baik ${who}, tim sales kami segera menghubungi ya. Mohon ditunggu 🙏`;
+
+  const parts: string[] = [];
+  if (opts.firstContact) parts.push(openerLine());
+  if (deflect) parts.push(deflect);
+  if (opts.info) parts.push(opts.info);
+  parts.push(question);
+  return cleanBotText(parts.join(" "));
 }
 
 const PRICE_LIKE_RE = /rp\s?[\d.]+|\d{2,3}(?:\.\d{3}){2,}|\bjuta\b|\bdp\b|cicil|angsur|tenor|cashback|diskon|promo/i;
-
-function questionFor(field: QualificationKey, lead: ChatbotLead): string {
-  switch (field) {
-    case "customer_name":
-      return lead.wa_profile_name
-        ? `Sebelumnya, boleh kami tahu nama Bapak/Ibu? Apakah benar dengan *${normalizeName(lead.wa_profile_name) ?? lead.wa_profile_name}*?`
-        : "Sebelumnya, boleh kami tahu dengan Bapak/Ibu siapa?";
-    case "domicile":
-      return "Boleh kami tahu Bapak/Ibu berdomisili di kota/kabupaten mana? Agar kami hubungkan dengan dealer Mitsubishi DIPO terdekat 📍";
-    case "interested_unit":
-      return `Unit Mitsubishi apa yang sedang Bapak/Ibu minati? 🚗\nPilihan: ${MITSUBISHI_UNITS.slice(0, -1).join(", ")}, atau ${MITSUBISHI_UNITS.at(-1)}.`;
-  }
-}
 
 function generateWithRules(input: ChatbotInput): ChatbotResult {
   const { lead, history } = input;
   const extraction = extractWithRules(input);
   const pending = pendingCustomerText(history);
-  const firstContact = !history.some((t) => t.sender !== "customer");
+  const firstContact = isFirstContact(history);
 
   const merged: ChatbotLead = {
     ...lead,
@@ -479,62 +583,27 @@ function generateWithRules(input: ChatbotInput): ChatbotResult {
     domicile: lead.domicile || extraction.domicile,
     interested_unit: lead.interested_unit || extraction.unit,
   };
-  const name = merged.customer_name;
-  const nextMissing = missingFields(merged)[0];
 
-  const lines: string[] = [];
-
-  if (firstContact) {
-    lines.push(
-      `Halo, terima kasih sudah menghubungi *Mitsubishi DIPO* 🙏 Saya Asisten Virtual yang siap membantu Bapak/Ibu${
-        lead.ad_headline ? ` terkait *${lead.ad_headline}*` : ""
-      }.`,
-    );
-  }
-
-  const acks: string[] = [];
-  if (extraction.name) acks.push(`Salam kenal, Bapak/Ibu ${extraction.name} 😊`);
-  if (extraction.domicile) acks.push(`Domisili di ${extraction.domicile} sudah kami catat.`);
-  if (extraction.unit) acks.push(`${extraction.unit} pilihan yang tepat! 👍`);
-  if (acks.length) lines.push(acks.join(" "));
-
-  // Harga/DP/cicilan/promo dll. tidak pernah dijawab bot -> diarahkan ke 3 data dulu, lalu tim Sales.
+  // Harga/DP/cicilan/promo dll. tidak dijawab bot -> dibantu tim sales.
   const topics = salesTopics(pending);
-  const deflect = salesDeflectLine(topics, Boolean(nextMissing));
   // Knowledge base hanya untuk info umum (lokasi, jam buka, gambaran unit), tanpa angka harga.
-  const kbLines =
+  const kbLine =
     topics.length === 0 && /\?|\b(alamat|lokasi|dealer|cabang|showroom|dimana|di mana|buka|jam|spesifikasi|spek|warna|tipe|varian)\b/i.test(pending)
-      ? searchKnowledge(input.knowledge ?? "", pending, { unit: merged.interested_unit, domicile: merged.domicile }).filter(
+      ? searchKnowledge(input.knowledge ?? "", pending, { unit: merged.interested_unit, domicile: merged.domicile }).find(
           (l) => !PRICE_LIKE_RE.test(l),
-        )
-      : [];
-  const intent = deflect;
-  let answer: string | null = null;
-  if (deflect) {
-    answer = deflect;
-    lines.push(deflect);
-  } else if (kbLines.length) {
-    answer = `Berikut info dari kami:\n${kbLines.map((l) => `• ${l}`).join("\n")}`;
-    lines.push(answer);
-  }
-
-  if (nextMissing) {
-    if (!firstContact && acks.length === 0 && !intent) {
-      lines.push("Terima kasih atas pesannya 🙏");
-    }
-    lines.push(questionFor(nextMissing, merged));
-  } else if (missingFields(lead).length === 0) {
-    // Lead sudah warm sebelumnya tetapi bot diaktifkan kembali oleh CS.
-    lines.push(
-      `Terima kasih Bapak/Ibu ${name ?? ""} 🙏 Data Anda sudah kami terima, Sales Consultant Mitsubishi DIPO area ${
-        merged.domicile ?? ""
-      } akan segera menghubungi Bapak/Ibu.`,
-    );
-  }
+        ) ?? null
+      : null;
+  const info = kbLine ? `Info dari kami: ${kbLine.replace(/\s*\|\s*/g, ", ")}.`.replace(/\.\.$/, ".") : null;
 
   return {
-    reply_message: lines.join("\n\n").trim() || "Terima kasih, pesan Bapak/Ibu sudah kami terima 🙏",
-    answer_to_question: answer,
+    reply_message: composeReply(merged, {
+      firstContact,
+      salesTopics: topics,
+      info,
+      justGotName: Boolean(extraction.name),
+    }),
+    // Untuk harga dll. tidak perlu dijawab terpisah: pesan handoff sudah menyebut info promo & penawaran.
+    answer_to_question: info,
     extracted_name: extraction.name,
     extracted_domicile: extraction.domicile,
     extracted_unit: extraction.unit,
@@ -560,13 +629,16 @@ export function simulateCustomerReply(lead: ChatbotLead): string {
 
   switch (next) {
     case "customer_name":
-      return pick([
-        `Saya ${name}`,
-        `Nama saya ${name} kak`,
-        `Dengan ${name} pak`,
-        `Panggil saja ${name}`,
-        `Saya ${name} dari ${city}, mau tanya ${unit}`,
-      ]);
+      if (!isFilled(lead.domicile)) {
+        return pick([
+          `${name}, ${city}`,
+          `Saya ${name} dari ${city}`,
+          `Dengan ${name}, domisili ${city}`,
+          `${name} kak, di ${city}`,
+          `Saya ${name}`,
+        ]);
+      }
+      return pick([`Saya ${name}`, `Dengan ${name}`, `${name}`]);
     case "domicile":
       return pick([
         `Saya tinggal di ${city}`,

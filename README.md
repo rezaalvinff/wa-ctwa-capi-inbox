@@ -196,8 +196,10 @@ Lead simulasi (`is_simulated = true`) **tidak pernah** dikirimi pesan WhatsApp s
 
 ## Aturan Bot (hemat pesan WhatsApp)
 
-- **Fokus 3 data:** bot selalu mengarahkan percakapan untuk mendapatkan **nama, domisili, dan unit** secepatnya.
-- **Tidak pernah menyebut harga, OTR, DP, cicilan/angsuran, kredit, promo, stok, tukar tambah, atau test drive.** Jawabannya selalu: *"Untuk info … akan diinfokan langsung oleh tim Sales Consultant kami 🙏 Untuk itu kami butuh 3 info dulu ya: nama, domisili, dan unit Mitsubishi yang diminati."*, lalu bot menanyakan data yang masih kurang. Knowledge base hanya dipakai untuk info umum (lokasi & jam dealer, gambaran unit).
+- **Gaya singkat & natural seperti CS manusia:** maksimal ±2 kalimat, tanpa tanda bintang/format tebal, dan tidak pernah menyebut "butuh 3 info". Alurnya tetap mengarah ke **nama, domisili, dan unit**.
+- **Balasan pertama selalu dibuka dengan:** *"Halo Bapak/Ibu, dengan saya Galuh CS Dealer Mitsubishi DIPO. Kalo boleh tau dengan Bapak/Ibu siapa ini dan domisilinya dimana?"* (nama CS bisa diganti lewat env `BOT_CS_NAME`). Setelah itu bot menanyakan unit yang diminati.
+- **Kalau 3 data sudah lengkap:** *"Baik Bapak/Ibu {nama}, saya izin langsung sambungkan dengan tim sales kami untuk diberikan info promo dan penawarannya ya. Segera dihubungi, mohon ditunggu 🙏"*, lalu bot berhenti.
+- **Tidak pernah menyebut harga, OTR, DP, cicilan/angsuran, kredit, promo, stok, tukar tambah, atau test drive.** Cukup dijawab singkat *"Untuk harga dan DPnya nanti dibantu langsung oleh tim sales kami ya."* lalu lanjut menanyakan data yang kurang. Knowledge base hanya dipakai untuk info umum (lokasi & jam dealer, gambaran unit).
 - **Maksimal 8 balasan bot per lead.** Kalau sampai balasan ke-8 data belum lengkap, bot menutup dengan pesan sopan, berhenti (`bot_active = false`), dan mencatat *"Bot berhenti setelah 8 balasan"* agar Admin melanjutkan.
 - **Pesan "ok", "makasih", atau emoji saja tidak dibalas.** "ya" dan "iya betul" tetap dibalas karena bisa berupa konfirmasi nama.
 - **Tanpa akun agent aktif,** lead WARM ditangani Admin dengan catatan *"Lead WARM — ditangani Admin"*.
