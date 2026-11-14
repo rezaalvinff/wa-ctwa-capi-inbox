@@ -4,8 +4,8 @@ import { errorMessage, jsonError } from "@/lib/http";
 import { computeStatus } from "@/lib/leads";
 import { getRequestUser } from "@/lib/auth/users";
 import { ASSIGNED_AGENT_EMBED, canAccessLead } from "@/lib/auth/access";
-import { autoAssignLead } from "@/lib/routing";
-import { addSystemNote, noteAutoAssigned, noteManualAssigned, noteNoAgentMatch, noteReturnedToAdmin } from "@/lib/notes";
+import { autoAssignLead, countActiveAgents } from "@/lib/routing";
+import { addSystemNote, noteAdminHandles, noteAutoAssigned, noteManualAssigned, noteNoAgentMatch, noteReturnedToAdmin } from "@/lib/notes";
 import { sendLeadEventRealtime, type RealtimeCapiResult } from "@/lib/capi";
 import type { Lead } from "@/lib/types";
 
@@ -117,7 +117,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         autoAssigned = { id: result.agent.id, full_name: result.agent.full_name };
         await addSystemNote(id, noteAutoAssigned(result.agent.full_name, (updated as Lead).domicile ?? "", result.region));
       } else if (becameWarm && !(updated as Lead).assigned_agent_id) {
-        await addSystemNote(id, noteNoAgentMatch((updated as Lead).domicile ?? ""));
+        const domicile = (updated as Lead).domicile ?? "";
+        const agents = await countActiveAgents().catch(() => 1);
+        await addSystemNote(id, agents === 0 ? noteAdminHandles(domicile) : noteNoAgentMatch(domicile));
       }
     }
 

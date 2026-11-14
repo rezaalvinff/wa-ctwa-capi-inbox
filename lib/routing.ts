@@ -122,3 +122,14 @@ export async function autoAssignLead(lead: Pick<Lead, "id" | "status" | "domicil
   if (!updated || updated.length === 0) return null;
   return { agent: chosen, region: bestMatchingRegion(lead.domicile, chosen.regions) ?? lead.domicile };
 }
+
+/** Jumlah agent aktif. 0 = belum memakai agent, semua lead ditangani Admin. */
+export async function countActiveAgents(): Promise<number> {
+  const { count, error } = await getSupabaseAdmin()
+    .from("app_users")
+    .select("id", { count: "exact", head: true })
+    .eq("role", "agent")
+    .eq("is_active", true);
+  if (error) throw error;
+  return count ?? 0;
+}

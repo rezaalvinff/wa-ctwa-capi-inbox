@@ -4,19 +4,19 @@
  */
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isMockMode } from "@/lib/config";
-import { buildHandoffMessage, generateBotReply, type ChatTurn } from "@/lib/chatbot";
+import { buildHandoffMessage, generateBotReply, isAcknowledgementOnly, pendingCustomerText, type ChatTurn } from "@/lib/chatbot";
 import { computeStatus, isFilled } from "@/lib/leads";
 import { normalizeDomicile, normalizeName, normalizeUnit } from "@/lib/mitsubishi";
 import { sendWhatsAppText } from "@/lib/whatsapp";
 import { loadActiveKnowledge } from "@/lib/knowledge";
-import { autoAssignLead, type AgentCandidate, type AutoAssignResult } from "@/lib/routing";
-import { addSystemNote, noteAutoAssigned, noteNoAgentMatch } from "@/lib/notes";
+import { autoAssignLead, countActiveAgents, type AgentCandidate, type AutoAssignResult } from "@/lib/routing";
+import { addSystemNote, noteAdminHandles, noteAutoAssigned, noteBotLimit, noteNoAgentMatch } from "@/lib/notes";
 import { sendLeadEventRealtime, type RealtimeCapiResult } from "@/lib/capi";
 import type { Lead, Message } from "@/lib/types";
 
 export interface BotRunResult {
   ran: boolean;
-  skipped_reason?: "lead_not_found" | "bot_inactive" | "newer_message";
+  skipped_reason?: "lead_not_found" | "bot_inactive" | "newer_message" | "ack_only" | "reply_limit";
   engine?: "gemini" | "rules";
   engine_error?: string;
   extracted?: { customer_name: string | null; domicile: string | null; interested_unit: string | null };
@@ -30,6 +30,10 @@ export interface BotRunResult {
 }
 
 const HISTORY_LIMIT = 40;
+/** Maksimal balasan bot per lead. Setelah itu (data belum lengkap) bot berhenti & Admin melanjutkan. */
+export const BOT_MAX_REPLIES = 8;
+const BOT_LIMIT_MESSAGE =
+  "Terima kasih atas waktunya Bapak/Ibu 🙏 Tim Mitsubishi DIPO akan segera melanjutkan percakapan ini untuk membantu kebutuhan Bapak/Ibu.";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -84,6 +88,19 @@ export async function runBotForInbound(
   const history: ChatTurn[] = ((historyRows ?? []) as Array<{ sender_type: ChatTurn["sender"]; content: string; created_at: string }>)
     .map((m) => ({ sender: m.sender_type, content: m.content, created_at: m.created_at }))
     .reverse();
+
+  // Hemat pesan: "ok", "makasih", "👍" tidak dibalas (kecuali sapaan pertama).
+  const botReplies = history.filter((t) => t.sender === "bot").length;
+  if (botReplies > 0 && isAcknowledgementOnly(pendingCustomerText(history))) {
+    return { ran: false, skipped_reason: "ack_only", lead };
+  }
+
+  // Batas balasan bot: sudah mencapai batas -> serahkan ke Admin tanpa membalas lagi.
+  if (botReplies >= BOT_MAX_REPLIES) {
+    await supabase.from("leads").update({ bot_active: false }).eq("id", leadId);
+    await addSystemNote(leadId, noteBotLimit(BOT_MAX_REPLIES));
+    return { ran: false, skipped_reason: "reply_limit", lead };
+  }
 
   const knowledge = await loadActiveKnowledge();
   const result = await generateBotReply({ lead, history, knowledge: knowledge.text });
@@ -142,10 +159,15 @@ export async function runBotForInbound(
     }
   }
 
+  // Balasan terakhir yang diizinkan & data masih belum lengkap -> tutup dengan pesan handoff ke Admin.
+  const hitLimit = !becameWarm && newStatus !== "warm" && botReplies + 1 >= BOT_MAX_REPLIES;
+
   // Saat handoff, pertanyaan pelanggan di pesan yang sama tetap dijawab lebih dulu.
   const replyText = becameWarm
     ? [result.answer_to_question, buildHandoffMessage(updatedLead)].filter(Boolean).join("\n\n")
-    : result.reply_message;
+    : hitLimit
+      ? BOT_LIMIT_MESSAGE
+      : result.reply_message;
 
   let waMessageId: string | null = null;
   let sendError: string | null = null;
@@ -169,14 +191,24 @@ export async function runBotForInbound(
     .single();
   if (replyError) throw replyError;
 
+  if (hitLimit) {
+    await supabase.from("leads").update({ bot_active: false }).eq("id", leadId);
+    await addSystemNote(leadId, noteBotLimit(BOT_MAX_REPLIES));
+    updatedLead = { ...updatedLead, bot_active: false };
+  }
+
   // Setelah handoff: catatan oper di roomchat + kirim event LeadSubmitted ke Meta CAPI (real-time).
   let capi: RealtimeCapiResult | undefined;
   if (becameWarm) {
     const domicile = updatedLead.domicile ?? "";
-    await addSystemNote(
-      leadId,
-      assignment ? noteAutoAssigned(assignment.agent.full_name, domicile, assignment.region) : noteNoAgentMatch(domicile),
-    );
+    let note: string;
+    if (assignment) {
+      note = noteAutoAssigned(assignment.agent.full_name, domicile, assignment.region);
+    } else {
+      const agents = await countActiveAgents().catch(() => 1);
+      note = agents === 0 ? noteAdminHandles(domicile) : noteNoAgentMatch(domicile);
+    }
+    await addSystemNote(leadId, note);
     capi = await sendLeadEventRealtime(leadId);
   }
 

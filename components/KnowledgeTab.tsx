@@ -152,8 +152,9 @@ export default function KnowledgeTab({ active }: { active: boolean }) {
             <BookOpen className="h-5 w-5 text-red-600" /> Knowledge Base Chatbot
           </h2>
           <p className="mt-0.5 text-sm text-slate-500">
-            Materi aktif (harga OTR, lokasi dealer, promo, spesifikasi, FAQ) dibaca bot di <b>setiap balasan</b>. Tidak perlu training
-            ulang: materi baru atau perubahan langsung berlaku. Bot tetap mengoper ke Sales setelah nama, domisili, dan unit lengkap.
+            Materi aktif dibaca bot di <b>setiap balasan</b> untuk menjawab info umum (lokasi & jam buka dealer, gambaran unit, FAQ). Bot{" "}
+            <b>tidak pernah menyebut harga, DP, cicilan, atau promo</b>: pertanyaan seperti itu selalu diarahkan untuk melengkapi nama,
+            domisili, dan unit, lalu diinfokan tim Sales. Materi baru langsung berlaku tanpa training ulang.
           </p>
         </div>
 
