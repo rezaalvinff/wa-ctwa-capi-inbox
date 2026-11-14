@@ -56,6 +56,7 @@ interface WaContact {
 
 interface WaChangeValue {
   messaging_product?: string;
+  metadata?: { phone_number_id?: string; display_phone_number?: string };
   contacts?: WaContact[];
   messages?: WaMessage[];
   statuses?: unknown[];
@@ -125,6 +126,18 @@ export async function POST(req: NextRequest) {
         const value = change.value;
         // Event status delivery/read (tanpa messages) -> abaikan.
         if (!value?.messages || value.messages.length === 0) continue;
+
+        // Hanya proses chat untuk nomor milik aplikasi ini (WA_PHONE_NUMBER_ID).
+        // Melindungi nomor lain yang ikut terhubung ke Meta App yang sama
+        // (mis. nomor yang dikelola Qiscus) agar tidak ikut masuk / dibalas bot.
+        const allowedPhoneId = process.env.WA_PHONE_NUMBER_ID?.trim();
+        const incomingPhoneId = value.metadata?.phone_number_id;
+        if (allowedPhoneId && incomingPhoneId !== allowedPhoneId) {
+          console.warn(
+            `[webhook] Diabaikan: pesan untuk nomor ${value.metadata?.display_phone_number ?? incomingPhoneId ?? "?"} (bukan WA_PHONE_NUMBER_ID).`,
+          );
+          continue;
+        }
 
         for (const message of value.messages) {
           const contact =

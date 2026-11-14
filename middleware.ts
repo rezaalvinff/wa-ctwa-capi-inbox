@@ -5,7 +5,7 @@ import { USER_HEADERS } from "@/lib/auth/users";
 /**
  * Penjaga autentikasi & otorisasi untuk seluruh halaman dan API.
  *
- * - Publik      : /login, /api/auth/login, /api/auth/logout,
+ * - Publik      : /login, /privacy (syarat publish Meta App), /api/auth/login, /api/auth/logout,
  *                 /api/webhook (Meta), /api/cron/capi-sync (dilindungi CRON_SECRET).
  * - Admin saja  : /api/capi/*, /api/users/*, /api/simulate/*, /api/knowledge/*
  * - Admin+Agent : sisanya (inbox, kirim pesan, edit lead).
@@ -15,7 +15,7 @@ import { USER_HEADERS } from "@/lib/auth/users";
  * langsung berlaku (sesi lama otomatis tidak valid).
  */
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout", "/api/webhook", "/api/cron/capi-sync"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth/login", "/api/auth/logout", "/api/webhook", "/api/cron/capi-sync"];
 const ADMIN_ONLY_PATHS = ["/api/capi", "/api/users", "/api/simulate", "/api/knowledge"];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

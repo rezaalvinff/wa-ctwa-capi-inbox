@@ -172,6 +172,7 @@ cp .env.example .env.local
 | `META_APP_SECRET` | disarankan | Verifikasi signature `X-Hub-Signature-256` webhook |
 | `AUTH_SECRET` | ✅ | Secret penandatangan cookie login, **minimal 32 karakter** (`openssl rand -base64 48`) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | ✅ (sekali) | Akun Admin pertama, dibuat otomatis saat login pertama selama tabel `app_users` masih kosong |
+| `PRIVACY_CONTACT` | disarankan | Email/nomor kontak untuk permintaan data di halaman `/privacy` |
 | `MOCK_MODE` | – | `true` = tidak ada pesan yang dikirim ke WhatsApp (bot & CS hanya disimpan ke DB) |
 
 ## Menjalankan
@@ -259,6 +260,11 @@ Payload per lead (event dikirim satu per satu agar log per lead jelas, 5 paralel
 - `event_id` yang konsisten juga membuat Meta men-deduplikasi bila sync manual dan cron berjalan bersamaan.
 
 Cron di `vercel.json` berjalan `0 2 * * *` (UTC) = **09:00 WIB** setiap hari. Jika mengubah jadwal, ubah juga `CRON_SCHEDULE`/`CRON_LABEL` di `lib/config.ts` agar label di UI sama.
+
+## Keamanan nomor WhatsApp & Privacy Policy
+
+- Webhook **hanya memproses** pesan untuk nomor `WA_PHONE_NUMBER_ID`. Pesan untuk nomor lain yang terhubung ke Meta App yang sama (mis. nomor Qiscus) diabaikan. Selalu isi `WA_PHONE_NUMBER_ID` sebelum menyambungkan webhook.
+- Halaman publik `/privacy` (tanpa login) berisi kebijakan privasi & cara penghapusan data (`/privacy#hapus-data`). Gunakan sebagai **Privacy Policy URL** dan **User data deletion** URL saat publish Meta App. Isi `PRIVACY_CONTACT` agar kontak tampil.
 
 ## Deploy ke Vercel
 
