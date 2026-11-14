@@ -4,7 +4,15 @@
  */
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isMockMode } from "@/lib/config";
-import { buildHandoffMessage, generateBotReply, isAcknowledgementOnly, pendingCustomerText, type ChatTurn } from "@/lib/chatbot";
+import {
+  buildHandoffMessage,
+  cleanBotText,
+  generateBotReply,
+  isAcknowledgementOnly,
+  openerLine,
+  pendingCustomerText,
+  type ChatTurn,
+} from "@/lib/chatbot";
 import { computeStatus, isFilled } from "@/lib/leads";
 import { normalizeDomicile, normalizeName, normalizeUnit } from "@/lib/mitsubishi";
 import { sendWhatsAppText } from "@/lib/whatsapp";
@@ -32,8 +40,7 @@ export interface BotRunResult {
 const HISTORY_LIMIT = 40;
 /** Maksimal balasan bot per lead. Setelah itu (data belum lengkap) bot berhenti & Admin melanjutkan. */
 export const BOT_MAX_REPLIES = 8;
-const BOT_LIMIT_MESSAGE =
-  "Terima kasih atas waktunya Bapak/Ibu 🙏 Tim Mitsubishi DIPO akan segera melanjutkan percakapan ini untuk membantu kebutuhan Bapak/Ibu.";
+const BOT_LIMIT_MESSAGE = "Baik Bapak/Ibu, saya sambungkan dengan tim kami untuk dibantu lebih lanjut ya. Mohon ditunggu 🙏";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -163,11 +170,19 @@ export async function runBotForInbound(
   const hitLimit = !becameWarm && newStatus !== "warm" && botReplies + 1 >= BOT_MAX_REPLIES;
 
   // Saat handoff, pertanyaan pelanggan di pesan yang sama tetap dijawab lebih dulu.
-  const replyText = becameWarm
-    ? [result.answer_to_question, buildHandoffMessage(updatedLead)].filter(Boolean).join("\n\n")
-    : hitLimit
-      ? BOT_LIMIT_MESSAGE
-      : result.reply_message;
+  const replyText = cleanBotText(
+    becameWarm
+      ? [
+          botReplies === 0 ? openerLine() : null, // data langsung lengkap di pesan pertama
+          result.answer_to_question,
+          buildHandoffMessage(updatedLead),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : hitLimit
+        ? BOT_LIMIT_MESSAGE
+        : result.reply_message,
+  );
 
   let waMessageId: string | null = null;
   let sendError: string | null = null;
